@@ -14,7 +14,7 @@ object Log {
     private val fmt = SimpleDateFormat("MM-dd HH:mm:ss", Locale.US)
 
     fun init(ctx: Context) {
-        file = File(ctx.filesDir, "logs/commands.log").apply { parentFile?.mkdirs() }
+        file = File(ctx.filesDir, "logs/engine.log").apply { parentFile?.mkdirs() }
     }
 
     @Synchronized
