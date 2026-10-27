@@ -1,31 +1,26 @@
 package com.qcenaman.adbsaver
 
 import android.content.Context
+import kotlinx.coroutines.flow.MutableStateFlow
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** Command log: every tool call and engine event, kept in the app and appended to a file (never trimmed on disk). */
 object CmdLog {
     private lateinit var file: File
-    private val recent = ArrayDeque<String>()
     private val fmt = SimpleDateFormat("MM-dd HH:mm:ss", Locale.US)
-    @Volatile var version = 0L
-        private set
+    val recent = MutableStateFlow<List<String>>(emptyList())
 
-    fun init(ctx: Context) {
-        file = File(ctx.filesDir, "logs/commands.log").apply { parentFile?.mkdirs() }
+    fun init(c: Context) {
+        file = File(c.filesDir, "logs/commands.log").also { it.parentFile?.mkdirs() }
     }
 
     @Synchronized
-    fun add(line: String) {
-        val l = "${fmt.format(Date())} ${line.replace('\n', ' ').take(300)}"
-        recent.addLast(l)
-        while (recent.size > 300) recent.removeFirst()
-        runCatching { file.appendText(l + "\n") }
-        version++
+    fun add(msg: String) {
+        val line = "${fmt.format(Date())} ${msg.replace('\n', ' ').take(300)}"
+        try { file.appendText(line + "\n") } catch (_: Exception) {}
+        recent.value = (listOf(line) + recent.value).take(200)
     }
-
-    @Synchronized
-    fun snapshot(): List<String> = recent.toList().asReversed()
 }
