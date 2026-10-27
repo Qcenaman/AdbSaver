@@ -1,0 +1,111 @@
+package com.qcenaman.adbsaver.engine
+
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.provider.Settings
+import com.qcenaman.adbsaver.CmdLog
+import com.qcenaman.adbsaver.adb.AdbManager
+import com.qcenaman.adbsaver.service.A11yService
+import io.github.muntashirakon.adb.android.AdbMdns
+import java.net.InetAddress
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+
+/**
+ * Pairs our own ADB client with this phone's Wireless debugging without the user:
+ * opens the pairing dialog, reads the code (and host:port) from the screen through the
+ * accessibility service, and runs the pairing handshake. Also accepts a code typed in the app.
+ */
+object AutoPair {
+    private val busy = AtomicBoolean(false)
+    @Volatile var lastAttempt = 0L
+    @Volatile var lastResult = ""
+
+    private val codeRe = Regex("""^\d{6}$""")
+    private val hostPortRe = Regex("""(\d{1,3}(?:\.\d{1,3}){3}):(\d{2,5})""")
+
+    /** Pair with a known code; host/port discovered over mDNS when not given. */
+    fun pairWithCode(ctx: Context, code: String, host: String? = null, port: Int = 0): Boolean {
+        val (h, p) = if (host != null && port > 0) host to port else discoverPairingPort(ctx) ?: ("127.0.0.1" to port)
+        if (p <= 0) { lastResult = "pairing port unknown"; CmdLog.add("pair: $lastResult"); return false }
+        return try {
+            val ok = AdbManager.get(ctx).pairWith(h, p, code.trim())
+            lastResult = if (ok) "paired" else "pairing rejected"
+            CmdLog.add("pair $h:$p -> $lastResult")
+            if (ok) AdbManager.get(ctx).ensureConnected(ctx)
+            ok
+        } catch (e: Throwable) {
+            lastResult = "pair failed: ${e.javaClass.simpleName}: ${e.message}"
+            CmdLog.add(lastResult); false
+        }
+    }
+
+    /** Fully automatic pairing via the accessibility service. Returns true when paired. */
+    fun auto(ctx: Context): Boolean {
+        if (!busy.compareAndSet(false, true)) return false
+        lastAttempt = System.currentTimeMillis()
+        try {
+            val a11y = A11yService.instance ?: run { lastResult = "accessibility service off"; CmdLog.add("autopair: $lastResult"); return false }
+            CmdLog.add("autopair: opening wireless debugging")
+            openWirelessDebugging(ctx)
+            // Make sure the toggle is on, then open the pairing-code dialog.
+            if (!waitFor(a11y, 6000) { labels -> labels.any { it.contains("pairing code", true) } }) {
+                a11y.tapLabel("Wireless debugging")
+                waitFor(a11y, 4000) { labels -> labels.any { it.contains("pairing code", true) } }
+            }
+            if (!a11y.tapLabel("Pair device with pairing code") && !a11y.tapLabel("pairing code")) {
+                lastResult = "pairing option not found on screen"; CmdLog.add("autopair: $lastResult"); goHome(a11y); return false
+            }
+            var code = ""; var host: String? = null; var port = 0
+            waitFor(a11y, 6000) { labels ->
+                code = labels.firstOrNull { codeRe.matches(it.trim()) }?.trim().orEmpty()
+                labels.firstNotNullOfOrNull { hostPortRe.find(it) }?.let { host = it.groupValues[1]; port = it.groupValues[2].toInt() }
+                code.isNotEmpty()
+            }
+            if (code.isEmpty()) { lastResult = "no pairing code on screen"; CmdLog.add("autopair: $lastResult"); goHome(a11y); return false }
+            CmdLog.add("autopair: code read, port ${port.takeIf { it > 0 } ?: "mdns"}")
+            val ok = pairWithCode(ctx, code, host, port)
+            goHome(a11y)
+            return ok
+        } finally { busy.set(false) }
+    }
+
+    private fun openWirelessDebugging(ctx: Context) {
+        val direct = Intent().setComponent(ComponentName("com.android.settings", "com.android.settings.Settings\$WirelessDebuggingActivity"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try { ctx.startActivity(direct) } catch (_: Exception) {
+            ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            A11yService.instance?.let { Thread.sleep(1200); it.scrollToText("Wireless debugging"); it.tapLabel("Wireless debugging") }
+        }
+    }
+
+    private fun waitFor(a11y: A11yService, ms: Long, cond: (List<String>) -> Boolean): Boolean {
+        val end = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < end) {
+            if (cond(a11y.elements().map { it.label })) return true
+            Thread.sleep(300)
+        }
+        return false
+    }
+
+    private fun goHome(a11y: A11yService) {
+        a11y.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+        Thread.sleep(300)
+        a11y.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME)
+    }
+
+    /** The pairing mDNS service is only advertised while the dialog is open. */
+    private fun discoverPairingPort(ctx: Context, timeoutMs: Long = 5000): Pair<String, Int>? {
+        val latch = CountDownLatch(1)
+        var found: Pair<String, Int>? = null
+        val mdns = AdbMdns(ctx, AdbMdns.SERVICE_TYPE_TLS_PAIRING) { addr: InetAddress?, port: Int ->
+            if (port > 0) { found = (addr?.hostAddress ?: "127.0.0.1") to port; latch.countDown() }
+        }
+        mdns.start()
+        latch.await(timeoutMs, TimeUnit.MILLISECONDS)
+        mdns.stop()
+        return found
+    }
+}

@@ -76,5 +76,10 @@
         <receiver
             android:name=".service.ActionReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".service.PairReceiver"
+            android:exported="true"
+            tools:ignore="ExportedReceiver" />
     </application>
 </manifest>

@@ -23,6 +23,8 @@ import java.util.concurrent.TimeUnit
 
 /** Our own ADB client: pairs with this phone's Wireless debugging and talks to adbd on localhost. */
 class AdbManager private constructor(dir: File) : AbsAdbConnectionManager() {
+    @Volatile var needsPairing = false
+        private set
     private val key: PrivateKey
     private val cert: Certificate
 
@@ -60,8 +62,12 @@ class AdbManager private constructor(dir: File) : AbsAdbConnectionManager() {
         if (isConnected) return true
         return try {
             val ok = connectTls(ctx, 8_000) || autoConnect(ctx, 5_000)
-            if (ok) CmdLog.add("adb connected")
+            if (ok) { needsPairing = false; CmdLog.add("adb connected") }
             ok
+        } catch (e: io.github.muntashirakon.adb.AdbPairingRequiredException) {
+            needsPairing = true
+            CmdLog.add("adb: pairing required")
+            false
         } catch (e: Throwable) {
             CmdLog.add("adb connect failed: ${e.javaClass.simpleName}: ${e.message}")
             false

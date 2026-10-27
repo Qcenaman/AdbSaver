@@ -1,11 +1,14 @@
 package com.qcenaman.adbsaver.net
 
 import android.content.Context
+import com.qcenaman.adbsaver.adb.AdbManager
+import com.qcenaman.adbsaver.engine.AutoPair
+import com.qcenaman.adbsaver.engine.Shell
 
 /**
- * Keeps the route to the PC alive and repairs the privileged channel.
- * Full reconnect / Wake-on-LAN / Tailscale logic lands in the link-keeper step;
- * for now it re-establishes the shell channel so tools work on LAN.
+ * Keeps the privileged channel alive: reconnects the shell channel, and when the phone says
+ * pairing is required, pairs itself through the accessibility service (at most every 10 min).
+ * PC route / Wake-on-LAN / Tailscale land in the link-keeper step.
  */
 object LinkKeeper {
     @Volatile private var running = false
@@ -15,7 +18,12 @@ object LinkKeeper {
         running = true
         Thread {
             while (running) {
-                try { com.qcenaman.adbsaver.engine.Shell.ready(ctx) } catch (_: Exception) {}
+                try {
+                    if (!Shell.ready(ctx) && AdbManager.get(ctx).needsPairing &&
+                        System.currentTimeMillis() - AutoPair.lastAttempt > 10 * 60_000L) {
+                        AutoPair.auto(ctx)
+                    }
+                } catch (_: Exception) {}
                 Thread.sleep(30_000)
             }
         }.apply { isDaemon = true; name = "link-keeper" }.start()
