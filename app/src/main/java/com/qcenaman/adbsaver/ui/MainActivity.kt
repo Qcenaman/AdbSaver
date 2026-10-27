@@ -21,7 +21,6 @@ import com.qcenaman.adbsaver.CmdLog
 import com.qcenaman.adbsaver.Prefs
 import com.qcenaman.adbsaver.adb.Pairing
 import com.qcenaman.adbsaver.appVersion
-import com.qcenaman.adbsaver.CmdLog
 import com.qcenaman.adbsaver.adb.AdbManager
 import com.qcenaman.adbsaver.engine.AutoPair
 import androidx.compose.runtime.collectAsState
