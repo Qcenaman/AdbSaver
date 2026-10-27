@@ -11,6 +11,7 @@ object Prefs {
     private lateinit var sp: SharedPreferences
 
     fun init(ctx: Context) {
+        tokenFile = java.io.File(ctx.filesDir, "token")
         sp = try {
             EncryptedSharedPreferences.create(
                 ctx, "secure",
@@ -21,16 +22,26 @@ object Prefs {
         } catch (e: Exception) {
             ctx.getSharedPreferences("plain_fallback", Context.MODE_PRIVATE)
         }
+        token
     }
 
+    private lateinit var tokenFile: java.io.File
+
     val token: String
-        get() = sp.getString("token", null) ?: newToken()
+        get() = sp.getString("token", null)?.also { mirror(it) } ?: newToken()
 
     fun newToken(): String {
         val b = ByteArray(24).also { SecureRandom().nextBytes(it) }
         val t = b.joinToString("") { "%02x".format(it) }
         sp.edit().putString("token", t).apply()
+        mirror(t)
         return t
+    }
+
+    /** Private copy for `adb shell run-as` (adb already outranks the token). */
+    private fun mirror(t: String) {
+        if (!::tokenFile.isInitialized) return
+        if (!tokenFile.exists() || tokenFile.readText() != t) runCatching { tokenFile.writeText(t) }
     }
 
     var paused: Boolean
