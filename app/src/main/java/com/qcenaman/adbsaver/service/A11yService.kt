@@ -71,15 +71,33 @@ class A11yService : AccessibilityService() {
         return ok
     }
 
-    fun scrollToText(text: String): Boolean {
-        repeat(8) {
-            if (elements().any { it.label.contains(text, true) }) return true
-            val h = resources.displayMetrics.heightPixels
-            swipe(resources.displayMetrics.widthPixels / 2, (h * 0.7).toInt(),
-                  resources.displayMetrics.widthPixels / 2, (h * 0.3).toInt(), 200)
-            Thread.sleep(400)
+    private fun visible(text: String) = elements().any { it.label.contains(text, true) }
+
+    /** Scroll page by page (no fling) until [text] is on screen. */
+    fun scrollToText(text: String, maxPages: Int = 12): Boolean {
+        if (visible(text)) return true
+        repeat(maxPages) {
+            val scrolled = scrollables().any { it.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) }
+            if (!scrolled) {
+                // No scrollable node reported: short, slow drag so the list cannot fling.
+                val w = resources.displayMetrics.widthPixels; val h = resources.displayMetrics.heightPixels
+                swipe(w / 2, (h * 0.62).toInt(), w / 2, (h * 0.42).toInt(), 600)
+            }
+            Thread.sleep(700)
+            if (visible(text)) return true
         }
-        return elements().any { it.label.contains(text, true) }
+        return false
+    }
+
+    private fun scrollables(): List<AccessibilityNodeInfo> {
+        val out = ArrayList<AccessibilityNodeInfo>()
+        fun walk(n: AccessibilityNodeInfo?) {
+            if (n == null) return
+            if (n.isScrollable && n.isVisibleToUser) out.add(n)
+            for (i in 0 until n.childCount) walk(n.getChild(i))
+        }
+        (windows?.mapNotNull { it.root } ?: listOfNotNull(rootInActiveWindow)).forEach { walk(it) }
+        return out
     }
 
     companion object {

@@ -51,11 +51,13 @@ object AutoPair {
             CmdLog.add("autopair: opening wireless debugging")
             openWirelessDebugging(ctx)
             // Make sure the toggle is on, then open the pairing-code dialog.
-            if (!waitFor(a11y, 6000) { labels -> labels.any { it.contains("pairing code", true) } }) {
-                a11y.tapLabel("Wireless debugging")
-                waitFor(a11y, 4000) { labels -> labels.any { it.contains("pairing code", true) } }
+            if (!waitFor(a11y, 4000) { labels -> labels.any { it.contains("pairing code", true) } }) {
+                // Landed on Developer options: find the row and open its page.
+                if (a11y.scrollToText("Wireless debugging")) { Thread.sleep(400); a11y.tapLabel("Wireless debugging") }
+                waitFor(a11y, 5000) { labels -> labels.any { it.contains("pairing code", true) } }
             }
-            if (!a11y.tapLabel("Pair device with pairing code") && !a11y.tapLabel("pairing code")) {
+            val opened = listOf("Pair device with pairing code", "Pair with pairing code", "pairing code").any { a11y.tapLabel(it) }
+            if (!opened) {
                 lastResult = "pairing option not found on screen"; CmdLog.add("autopair: $lastResult"); goHome(a11y); return false
             }
             var code = ""; var host: String? = null; var port = 0
@@ -77,7 +79,7 @@ object AutoPair {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try { ctx.startActivity(direct) } catch (_: Exception) {
             ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            A11yService.instance?.let { Thread.sleep(1200); it.scrollToText("Wireless debugging"); it.tapLabel("Wireless debugging") }
+            Thread.sleep(1200)
         }
     }
 
