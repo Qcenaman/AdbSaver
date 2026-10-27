@@ -40,7 +40,8 @@ object Jobs {
                     job.exit = code
                 }
             } catch (e: Exception) {
-                log.appendText("error: ${e.message}\n"); job.exit = -1
+                log.appendText("error: ${e.message}\n")
+                if (job.exit == null) job.exit = -1
             } finally { job.done = true }
         }
         return job

@@ -89,7 +89,8 @@ class AdbManager private constructor(dir: File) : AbsAdbConnectionManager() {
             val lineBuf = ByteArrayOutputStream()
             val buf = ByteArray(16384)
             while (true) {
-                val n = inp.read(buf)
+                // adbd closing the stream surfaces as an IOException here: that is a normal end of output.
+                val n = try { inp.read(buf) } catch (e: java.io.IOException) { -1 }
                 if (n < 0) break
                 // Pass bytes through, but strip our marker lines.
                 var start = 0
