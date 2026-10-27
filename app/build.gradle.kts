@@ -49,7 +49,8 @@ val tokenSaverDir = rootProject.file((findProperty("tokensaver.dir") as String?)
 val goExe = (findProperty("go.exe") as String?) ?: "go"
 val tokenSaverOut = file("src/main/jniLibs/arm64-v8a/libtokensaver.so")
 val buildTokenSaver by tasks.registering(Exec::class) {
-    inputs.dir(tokenSaverDir).withPropertyName("src")
+    // Only the Go sources are inputs: the folder also holds live logs and data Gradle must not hash.
+    inputs.files(fileTree(tokenSaverDir) { include("*.go", "go.mod", "go.sum") }).withPropertyName("src")
     outputs.file(tokenSaverOut)
     workingDir = tokenSaverDir
     environment("CGO_ENABLED", "0"); environment("GOOS", "android"); environment("GOARCH", "arm64")
