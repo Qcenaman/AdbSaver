@@ -28,12 +28,12 @@ jobs:
         run: cp AdbSaver/app/build/outputs/apk/debug/app-debug.apk AdbSaver-${GITHUB_SHA::7}.apk
       - uses: actions/upload-artifact@v4
         with: { name: app-debug, path: AdbSaver-*.apk, retention-days: 30 }
-      - name: Release the APK (rolling "latest" on main)
+      - name: Release the APK (a new release for every push to main, older ones kept)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: AdbSaver ${{ github.sha }}
+          tag_name: build-${{ github.run_number }}
+          name: AdbSaver build ${{ github.run_number }}
           body: "Debug build of ${{ github.sha }}. Install: adb install -r -t AdbSaver-*.apk"
           files: AdbSaver-*.apk
           fail_on_unmatched_files: true
