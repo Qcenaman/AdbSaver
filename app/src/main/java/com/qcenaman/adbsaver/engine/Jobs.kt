@@ -2,7 +2,6 @@ package com.qcenaman.adbsaver.engine
 
 import android.content.Context
 import com.qcenaman.adbsaver.App
-import com.qcenaman.adbsaver.adb.AdbManager
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -31,10 +30,8 @@ object Jobs {
         jobs[id] = job
         thread(name = "job-$id") {
             try {
-                val adb = AdbManager.get(App.ctx)
-                if (!adb.ensureConnected(App.ctx)) { log.appendText("adb unavailable\n"); job.exit = -1; job.done = true; return@thread }
                 log.outputStream().use { out ->
-                    val code = adb.exec(command, onPid = { job.pid = it }) { b, n ->
+                    val code = Shell.exec(App.ctx, command, onPid = { job.pid = it }) { b, n ->
                         if (!job.cancelled) out.write(b, 0, n)
                     }
                     job.exit = code

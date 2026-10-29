@@ -15,7 +15,7 @@ object Device {
 
     val screen = Tool("screen", "Screenshot as a downscaled JPEG (only when asked). Optional max_px.",
         """{"type":"object","properties":{"max_px":{"type":"integer"}}}""") { a ->
-        val png = Shell.runBytes(ctx, "screencap -p")
+        val png = Shell.runBytes(ctx, "screencap -p 2>/dev/null")
         if (png.isEmpty()) return@Tool ToolResult.err("screencap failed (shell channel down)")
         val bmp = BitmapFactory.decodeByteArray(png, 0, png.size) ?: return@Tool ToolResult.err("decode failed")
         val max = a.int("max_px", 900)
@@ -49,7 +49,7 @@ object Device {
         val bat = Shell.run(ctx, "dumpsys battery | grep -E 'level|status|temperature'").second
         val net = Shell.run(ctx, "settings get global wifi_on; ip route 2>/dev/null | head -1").second
         val disk = Shell.run(ctx, "df -h /sdcard | tail -1").second
-        ToolResult.ok("-- battery --\n$bat\n-- network --\n$net\n-- storage --\n$disk")
+        ToolResult.ok("-- shell --\n${Shell.status(ctx)}\n-- addresses --\n${com.qcenaman.adbsaver.net.Addresses.summary()}\n-- battery --\n$bat\n-- network --\n$net\n-- storage --\n$disk")
     }
 
     val web = Tool("web", "Fetch a URL on the phone and return clean text.",

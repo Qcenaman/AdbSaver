@@ -73,20 +73,36 @@ class A11yService : AccessibilityService() {
 
     private fun visible(text: String) = elements().any { it.label.contains(text, true) }
 
-    /** Scroll page by page (no fling) until [text] is on screen. */
-    fun scrollToText(text: String, maxPages: Int = 12): Boolean {
+    /** Scroll with slow drags that end at rest (no fling) until [text] is on screen. */
+    fun scrollToText(text: String, maxPages: Int = 25): Boolean {
         if (visible(text)) return true
+        val w = resources.displayMetrics.widthPixels; val h = resources.displayMetrics.heightPixels
         repeat(maxPages) {
-            val scrolled = scrollables().any { it.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) }
-            if (!scrolled) {
-                // No scrollable node reported: short, slow drag so the list cannot fling.
-                val w = resources.displayMetrics.widthPixels; val h = resources.displayMetrics.heightPixels
-                swipe(w / 2, (h * 0.62).toInt(), w / 2, (h * 0.42).toInt(), 600)
-            }
-            Thread.sleep(700)
+            slowDrag(w / 2f, h * 0.70f, w / 2f, h * 0.35f)
+            Thread.sleep(500)
             if (visible(text)) return true
         }
         return false
+    }
+
+    /** A drag that pauses at the end so the list stops where the finger stops. */
+    fun slowDrag(x1: Float, y1: Float, x2: Float, y2: Float): Boolean {
+        val move = Path().apply { moveTo(x1, y1); lineTo(x2, y2) }
+        val hold = Path().apply { moveTo(x2, y2); lineTo(x2, y2 + 0.5f) }
+        val s1 = GestureDescription.StrokeDescription(move, 0, 900, true)
+        val s2 = s1.continueStroke(hold, 900, 250, false)
+        val latch = CountDownLatch(1); var ok = false
+        dispatchGesture(GestureDescription.Builder().addStroke(s1).build(), object : GestureResultCallback() {
+            override fun onCompleted(d: GestureDescription?) {
+                dispatchGesture(GestureDescription.Builder().addStroke(s2).build(), object : GestureResultCallback() {
+                    override fun onCompleted(d: GestureDescription?) { ok = true; latch.countDown() }
+                    override fun onCancelled(d: GestureDescription?) { latch.countDown() }
+                }, null)
+            }
+            override fun onCancelled(d: GestureDescription?) { latch.countDown() }
+        }, null)
+        latch.await(3000, TimeUnit.MILLISECONDS)
+        return ok
     }
 
     private fun scrollables(): List<AccessibilityNodeInfo> {

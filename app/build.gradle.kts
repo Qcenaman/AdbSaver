@@ -42,6 +42,7 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
+    testImplementation("junit:junit:4.13.2")
 }
 
 // Builds the real TokenSaver (Go) for the phone and ships it as a native lib so it lands executable in nativeLibraryDir.

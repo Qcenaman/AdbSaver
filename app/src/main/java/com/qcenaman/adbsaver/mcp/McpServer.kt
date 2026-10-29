@@ -5,7 +5,13 @@ import com.qcenaman.adbsaver.Prefs
 import com.qcenaman.adbsaver.appVersion
 
 /** Dispatches one JSON-RPC line and returns the reply line (or null for notifications). */
-class McpServer(private val tools: List<Tool>) {
+class McpServer(private val tools: List<Tool>, private val gate: Gate = Gate()) {
+    /** Hooks into app state; the default uses Prefs/CmdLog, tests pass their own. */
+    class Gate(
+        val enabled: (String) -> Boolean = { Prefs.toolEnabled(it) },
+        val paused: () -> Boolean = { Prefs.paused },
+        val log: (String) -> Unit = { CmdLog.add(it) }
+    )
     private val byName = tools.associateBy { it.name }
 
     val instructions = "AdbSaver runs on this Android phone and returns short results. " +
@@ -18,7 +24,7 @@ class McpServer(private val tools: List<Tool>) {
         "media/files to move, compress and push/pull to the PC; saved for named commands and macros."
 
     fun handle(line: String): String? {
-        val req = Json.parse(line).asMap()
+        val req = try { Json.parse(line).asMap() } catch (e: Exception) { return error(null, -32700, "parse error") }
         val id = req["id"]
         val method = req.string("method")
         if (id == null) return null // notification
@@ -26,7 +32,7 @@ class McpServer(private val tools: List<Tool>) {
             when (method) {
                 "initialize" -> result(id, """{"protocolVersion":${Json.str(protoVer(req))},"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"adbsaver","version":${Json.str(appVersion)}},"instructions":${Json.str(instructions)}}""")
                 "ping" -> result(id, "{}")
-                "tools/list" -> result(id, """{"tools":[${tools.filter { Prefs.toolEnabled(it.name) }.joinToString(",") { toolJson(it) }}]}""")
+                "tools/list" -> result(id, """{"tools":[${tools.filter { gate.enabled(it.name) }.joinToString(",") { toolJson(it) }}]}""")
                 "tools/call" -> callTool(id, req["params"].asMap())
                 else -> error(id, -32601, "method not found: $method")
             }
@@ -45,9 +51,9 @@ class McpServer(private val tools: List<Tool>) {
         val name = params.string("name")
         val args = params["arguments"].asMap()
         val tool = byName[name] ?: return error(id, -32602, "unknown tool: $name")
-        if (!Prefs.toolEnabled(name)) return callResult(id, ToolResult.err("tool '$name' is turned off in AdbSaver"))
-        if (Prefs.paused) return callResult(id, ToolResult.err("AdbSaver is paused"))
-        CmdLog.add("$name ${argsPreview(args)}")
+        if (!gate.enabled(name)) return callResult(id, ToolResult.err("tool '$name' is turned off in AdbSaver"))
+        if (gate.paused()) return callResult(id, ToolResult.err("AdbSaver is paused"))
+        gate.log("$name ${argsPreview(args)}")
         val res = try { tool.handler(args) } catch (e: Throwable) { ToolResult.err("${e.javaClass.simpleName}: ${e.message}") }
         return callResult(id, res)
     }

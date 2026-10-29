@@ -1,0 +1,21 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: AdbSaver }
+      - uses: actions/checkout@v4
+        with: { repository: Qcenaman/TokenSaver, path: TokenSaver, token: "${{ secrets.TOKENSAVER_READ_TOKEN || github.token }}" }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24" }
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests and debug build
+        working-directory: AdbSaver
+        run: gradle :app:testDebugUnitTest :app:assembleDebug --no-daemon --console=plain -Ptokensaver.dir=../TokenSaver
+      - uses: actions/upload-artifact@v4
+        with: { name: app-debug, path: AdbSaver/app/build/outputs/apk/debug/app-debug.apk }

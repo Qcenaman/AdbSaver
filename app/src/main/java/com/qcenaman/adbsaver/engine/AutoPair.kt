@@ -1,6 +1,5 @@
 package com.qcenaman.adbsaver.engine
 
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
@@ -74,13 +73,10 @@ object AutoPair {
         } finally { busy.set(false) }
     }
 
+    /** Samsung routes the WirelessDebugging activity to Settings home, so always go via Developer options. */
     private fun openWirelessDebugging(ctx: Context) {
-        val direct = Intent().setComponent(ComponentName("com.android.settings", "com.android.settings.Settings\$WirelessDebuggingActivity"))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        try { ctx.startActivity(direct) } catch (_: Exception) {
-            ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            Thread.sleep(1200)
-        }
+        ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        Thread.sleep(1500)
     }
 
     private fun waitFor(a11y: A11yService, ms: Long, cond: (List<String>) -> Boolean): Boolean {
