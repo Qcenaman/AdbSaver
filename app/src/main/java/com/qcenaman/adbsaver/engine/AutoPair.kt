@@ -124,6 +124,8 @@ object AutoPair {
             Thread.sleep(1000)
         }
         nm.cancel(NOTIF_ID)
+        // Without notification permission the warning was never shown, so never take over the screen unasked.
+        if (decision == null && !nm.areNotificationsEnabled()) { CmdLog.add("autopair: notifications are off, so no warning could be shown — not pairing by itself"); decision = "skip" }
         return decision == null || decision == "now"
     }
 
