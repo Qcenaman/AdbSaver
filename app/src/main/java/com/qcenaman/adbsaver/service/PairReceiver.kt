@@ -7,7 +7,7 @@ import com.qcenaman.adbsaver.engine.AutoPair
 
 /**
  * `adb shell am broadcast -n com.qcenaman.adbsaver/.service.PairReceiver [--es code 123456 --ei port N]`
- * Pairs the app's own ADB client: with the given code, or fully automatically via accessibility.
+ * Pairs the app's own ADB client with the given code (no code: just starts watching for the pairing dialog).
  */
 class PairReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
@@ -16,7 +16,7 @@ class PairReceiver : BroadcastReceiver() {
         val app = context.applicationContext
         Thread {
             if (!code.isNullOrBlank()) AutoPair.pairWithCode(app, code, intent?.getStringExtra("host"), port)
-            else AutoPair.auto(app)
+            else com.qcenaman.adbsaver.adb.Pairing.startWatching(app)
         }.start()
     }
 }
