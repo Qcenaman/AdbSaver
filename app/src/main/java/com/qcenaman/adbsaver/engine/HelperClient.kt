@@ -1,8 +1,8 @@
 package com.qcenaman.adbsaver.engine
 
 import android.content.Context
-import android.net.LocalSocket
-import android.net.LocalSocketAddress
+import java.net.InetSocketAddress
+import java.net.Socket
 import com.qcenaman.adbsaver.CmdLog
 import com.qcenaman.adbsaver.Prefs
 import com.qcenaman.adbsaver.adb.AdbManager
@@ -14,14 +14,14 @@ import java.io.DataOutputStream
 object HelperClient {
     /** How long to wait for the helper's first frame (its pid) before treating it as hung. */
     const val FIRST_FRAME_MS = 15_000
-    private fun connect(): LocalSocket? = try {
-        LocalSocket().also { it.connect(LocalSocketAddress(Main.SOCKET)); it.soTimeout = 0 }
+    private fun connect(): Socket? = try {
+        Socket().also { it.connect(InetSocketAddress("127.0.0.1", Main.PORT), 1500); it.soTimeout = 0 }
     } catch (_: Exception) { null }
 
     fun alive(): Boolean {
         val s = connect() ?: return false
         return try {
-            val out = DataOutputStream(s.outputStream); val inp = DataInputStream(s.inputStream)
+            val out = DataOutputStream(s.getOutputStream()); val inp = DataInputStream(s.getInputStream())
             out.write((Prefs.token + "\n").toByteArray()); val c = "__ping__".toByteArray(); out.writeInt(c.size); out.write(c); out.flush()
             s.soTimeout = 3000
             inp.readByte().toInt() == 3
@@ -32,7 +32,7 @@ object HelperClient {
     fun exec(cmd: String, onPid: (Int) -> Unit = {}, onData: (ByteArray, Int) -> Unit): Int {
         val s = connect() ?: return -1
         try {
-            val out = DataOutputStream(s.outputStream); val inp = DataInputStream(s.inputStream)
+            val out = DataOutputStream(s.getOutputStream()); val inp = DataInputStream(s.getInputStream())
             out.write((Prefs.token + "\n").toByteArray()); val c = cmd.toByteArray(); out.writeInt(c.size); out.write(c); out.flush()
             // The helper answers with the pid frame at once; a helper that accepted but never answers is dead, not slow.
             s.soTimeout = FIRST_FRAME_MS
@@ -60,7 +60,8 @@ object HelperClient {
         val apk = ctx.applicationInfo.sourceDir
         val cmd = "CLASSPATH=$apk nohup setsid app_process /system/bin com.qcenaman.adbsaver.helper.Main ${Prefs.token} >/dev/null 2>&1 &"
         return try {
-            adb.capture("$cmd\nsleep 1; echo started")
+            // A helper from an older build (or one the app cannot reach) would block the port: replace it.
+            adb.capture("for p in \$(pgrep -f com.qcenaman.adbsaver.helper.Main); do [ \$p != \$\$ ] && kill -9 \$p; done 2>/dev/null; sleep 0.3\n$cmd\nsleep 1; echo started")
             val ok = (1..6).any { Thread.sleep(500); alive() }
             CmdLog.add(if (ok) "shell helper started (uid 2000, survives Wi-Fi loss)" else "shell helper did not come up")
             ok
