@@ -118,15 +118,15 @@ object AutoPair {
         while (System.currentTimeMillis() < end && decision == null) {
             val left = ((end - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
             nm.notify(NOTIF_ID, Notification.Builder(ctx, App.CH_PAIR).setSmallIcon(R.drawable.ic_engine)
-                .setContentTitle("AdbSaver will pair itself in ${left}s")
-                .setContentText("It will open Settings and tap Wireless debugging. Put the phone down, or choose Manually / Not now.")
+                .setContentTitle("AdbSaver needs its one-time pairing (${left}s)")
+                .setContentText("Pair now = it opens Settings and taps around by itself. Manually = you open 'Pair device with pairing code' and type the code.")
                 .setOnlyAlertOnce(true).addAction(action("Pair now", ActionReceiver.AUTOPAIR_NOW)).addAction(action("Manually", ActionReceiver.AUTOPAIR_MANUAL)).addAction(action("Not now", ActionReceiver.AUTOPAIR_SKIP)).build())
             Thread.sleep(1000)
         }
         nm.cancel(NOTIF_ID)
-        // Without notification permission the warning was never shown, so never take over the screen unasked.
-        if (decision == null && !nm.areNotificationsEnabled()) { CmdLog.add("autopair: notifications are off, so no warning could be shown — not pairing by itself"); decision = "skip" }
-        return decision == null || decision == "now"
+        // Opt-in only: the screen automation runs when the user taps "Pair now"; no answer means "not now".
+        if (decision == null) { CmdLog.add("autopair: no answer to the warning — not touching the screen"); decision = "skip" }
+        return decision == "now"
     }
 
     /** Samsung routes the WirelessDebugging activity to Settings home, so always go via Developer options. */
