@@ -26,6 +26,7 @@ class EngineService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (Prefs.killed) { stopSelf(); return START_NOT_STICKY }
         startForeground(NOTIF_ID, buildNotification())
+        ensureAccessibilityEnabled()
         if (Prefs.stayAwake && wake == null) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AdbSaver:engine").apply {
@@ -55,6 +56,20 @@ class EngineService : Service() {
                 .set(android.app.AlarmManager.RTC, System.currentTimeMillis() + 1000, pi)
         }
         super.onTaskRemoved(rootIntent)
+    }
+
+    /** Updates switch our accessibility service off; with WRITE_SECURE_SETTINGS we switch it back on ourselves. */
+    private fun ensureAccessibilityEnabled() {
+        try {
+            val me = "$packageName/${A11yService::class.java.name}"
+            val cr = contentResolver
+            val cur = android.provider.Settings.Secure.getString(cr, "enabled_accessibility_services") ?: ""
+            if (cur.split(':').none { it.equals(me, true) }) {
+                android.provider.Settings.Secure.putString(cr, "enabled_accessibility_services", if (cur.isBlank()) me else "$cur:$me")
+                android.provider.Settings.Secure.putInt(cr, "accessibility_enabled", 1)
+                CmdLog.add("accessibility service re-enabled")
+            }
+        } catch (e: Exception) { CmdLog.add("cannot enable accessibility myself: ${e.message}") }
     }
 
     private fun buildNotification(): Notification {
