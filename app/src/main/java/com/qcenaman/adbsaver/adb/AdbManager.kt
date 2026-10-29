@@ -82,9 +82,12 @@ class AdbManager private constructor(dir: File) : AbsAdbConnectionManager() {
      */
     fun exec(cmd: String, onPid: (Int) -> Unit = {}, onData: (ByteArray, Int) -> Unit): Int {
         val b64 = android.util.Base64.encodeToString(cmd.toByteArray(), android.util.Base64.NO_WRAP)
-        val wrapped = "sh -c \"\$(echo $b64 | base64 -d)\" </dev/null 2>&1 & p=\$!; echo $MARK_PID\$p; wait \$p; echo $MARK_EXIT\$?"
+        val wrapped = "sh -c \"\$(echo $b64 | base64 -d)\" </dev/null 2>&1 & p=\$!; echo $MARK_PID\$p; wait \$p; r=\$?; echo; echo $MARK_EXIT\$r"
         val s: AdbStream = openStream("shell:$wrapped")
         var exit = -1
+        // The last output line is held back until the next one arrives: the "echo" before the exit marker adds an empty
+        // line when the command's output did not end with a newline, and that extra line must not reach the caller.
+        var pending: ByteArray? = null
         s.openInputStream().use { inp ->
             val lineBuf = ByteArrayOutputStream()
             val buf = ByteArray(16384)
@@ -100,8 +103,11 @@ class AdbManager private constructor(dir: File) : AbsAdbConnectionManager() {
                         val line = lineBuf.toString(Charsets.UTF_8.name())
                         when {
                             line.startsWith(MARK_PID) -> line.removePrefix(MARK_PID).trim().toIntOrNull()?.let(onPid)
-                            line.startsWith(MARK_EXIT) -> exit = line.removePrefix(MARK_EXIT).trim().toIntOrNull() ?: -1
-                            else -> { val bb = lineBuf.toByteArray(); onData(bb, bb.size) }
+                            line.startsWith(MARK_EXIT) -> {
+                                exit = line.removePrefix(MARK_EXIT).trim().toIntOrNull() ?: -1
+                                pending?.let { if (!(it.size == 1 && it[0] == '\n'.code.toByte())) onData(it, it.size) }; pending = null
+                            }
+                            else -> { pending?.let { onData(it, it.size) }; pending = lineBuf.toByteArray() }
                         }
                         lineBuf.reset()
                         start = i + 1
@@ -109,6 +115,7 @@ class AdbManager private constructor(dir: File) : AbsAdbConnectionManager() {
                 }
                 if (start < n) lineBuf.write(buf, start, n - start)
             }
+            pending?.let { onData(it, it.size) }
             if (lineBuf.size() > 0) { val bb = lineBuf.toByteArray(); onData(bb, bb.size) }
         }
         try { s.close() } catch (_: Exception) {}
