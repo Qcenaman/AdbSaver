@@ -4,6 +4,7 @@ import android.content.Context
 import com.qcenaman.adbsaver.Prefs
 import com.qcenaman.adbsaver.mcp.McpServer
 import com.qcenaman.adbsaver.tools.Registry
+import com.qcenaman.adbsaver.mcp.asMap
 import fi.iki.elonen.NanoHTTPD
 
 /**
@@ -27,7 +28,14 @@ class HttpServer(private val ctx: Context, port: Int) : NanoHTTPD(port) {
         if (!authed(session)) return newFixedLengthResponse(Response.Status.UNAUTHORIZED, "text/plain", "unauthorized")
         val body = HashMap<String, String>(); session.parseBody(body)
         val json = body["postData"] ?: ""
-        if (!json.contains("\"token\"")) return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "token missing")
+        if (!json.contains("\"token\"")) {
+            // No token: a route refresh from an already-paired PC (e.g. a new tunnel URL).
+            val m = runCatching { com.qcenaman.adbsaver.mcp.Json.parse(json).asMap() }.getOrNull()
+                ?: return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "bad json")
+            if (PcLink.pc() == null) return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "token missing")
+            PcLink.merge(m["routes"]?.asMap() ?: m)
+            return newFixedLengthResponse(Response.Status.OK, "text/plain", "ok")
+        }
         PcLink.store(json)
         Thread { PcLink.report(ctx) }.start()
         return newFixedLengthResponse(Response.Status.OK, "text/plain", "ok")

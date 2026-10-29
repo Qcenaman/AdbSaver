@@ -64,6 +64,11 @@ object Prefs {
         get() = sp.getString("pc_link", null)
         set(v) = sp.edit().putString("pc_link", v).apply()
 
+    /** Routes typed on the phone ({"public_host":…,"tunnel_url":…}); win over what the PC sent. */
+    var pcRouteJson: String?
+        get() = sp.getString("pc_route", null)
+        set(v) = sp.edit().putString("pc_route", v).apply()
+
     fun toolEnabled(name: String) = sp.getBoolean("tool_$name", true)
     fun setToolEnabled(name: String, v: Boolean) = sp.edit().putBoolean("tool_$name", v).apply()
 }
