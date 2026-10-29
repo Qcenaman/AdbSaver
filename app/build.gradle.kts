@@ -15,7 +15,15 @@ android {
         versionName = "0.1.0"
         ndk { abiFilters += "arm64-v8a" }
     }
+    // One keystore for every build (PC and CI) so each new APK installs over the previous one without a reinstall.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("app/debug.keystore")
+            storePassword = "android"; keyAlias = "androiddebugkey"; keyPassword = "android"
+        }
+    }
     buildTypes {
+        debug { signingConfig = signingConfigs.getByName("debug") }
         release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("debug") }
     }
     compileOptions {
