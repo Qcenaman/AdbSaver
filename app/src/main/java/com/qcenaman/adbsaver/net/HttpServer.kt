@@ -36,10 +36,11 @@ class HttpServer(private val ctx: Context, port: Int) : NanoHTTPD(port) {
             // has — this needs no ADB, only the phone's own access token from the app screen in the Authorization header.
             if (PcLink.pc() == null) return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "no PC link yet: POST the full link (with token) to /link")
             PcLink.merge(m["routes"]?.asMap() ?: m)
+            PcLink.reportSoon(ctx, "link", 1500)
             return newFixedLengthResponse(Response.Status.OK, "text/plain", "ok")
         }
         PcLink.store(json)
-        Thread { PcLink.report(ctx) }.start()
+        PcLink.reportSoon(ctx, "pair", 1500)
         return newFixedLengthResponse(Response.Status.OK, "text/plain", "ok")
     }
 

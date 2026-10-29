@@ -33,7 +33,9 @@ object Extra {
         when (a.string("action", "call").lowercase()) {
             "status" -> {
                 val p = com.qcenaman.adbsaver.net.PcLink.pc() ?: return@Tool ToolResult.err("no PC link yet (run `phone pair` on the PC while the phone is on the LAN)")
-                ToolResult.ok("pc=${p.name} port=${p.port} ${p.summary()}\n${com.qcenaman.adbsaver.net.PcLink.probeAll()}")
+                val out = ToolResult.ok("pc=${p.name} port=${p.port} ${p.summary()}\n${com.qcenaman.adbsaver.net.PcLink.probeAll()}")
+                com.qcenaman.adbsaver.net.PcLink.reportSoon(App.ctx, "pc status")
+                out
             }
             "wake" -> ToolResult.ok(com.qcenaman.adbsaver.net.PcLink.wake())
             "route" -> ToolResult.ok(com.qcenaman.adbsaver.net.PcLink.setManualRoute(a.string("kind"), a.string("value")))

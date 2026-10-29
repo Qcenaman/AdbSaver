@@ -111,7 +111,8 @@ object PcLink {
         }.apply { start() } }
         threads.forEach { it.join() }
         val using = if (cachedBase != null && System.currentTimeMillis() - cachedAt < 60_000) cachedVia else ""
-        return rs.mapIndexed { i, r -> "${r.via.padEnd(9)} ${r.base}  ${results[i]}${if (r.via == using) "  (in use)" else ""}" }.joinToString("\n")
+        return rs.mapIndexed { i, r -> "${r.via.padEnd(9)} ${r.base}  ${results[i]}${if (r.via == using) "  (in use)" else ""}" }.joinToString("\n") +
+            "\nphone: ${Addresses.summary()}\nlast report: ${reportSummary()}"
     }
 
     /** One MCP tools/call on the PC. */
@@ -137,25 +138,76 @@ object PcLink {
         return if (img != null) ToolResult(text, isErr, img.string("data"), img.string("mimeType", "image/png")) else ToolResult(text, isErr)
     }
 
-    /** Tell the PC where we are (LAN / Tailscale / adb port / battery / network). Only works once paired. */
-    fun report(ctx: Context, adbPort: Int = 0) {
-        val p = pc() ?: return
-        val (base, via) = reach() ?: return
+    // ---- reporting to the PC (POST /phone/report) ----
+
+    @Volatile var lastReportAt = 0L; private set
+    @Volatile var lastReportVia = ""; private set
+    @Volatile var lastReportError = ""; private set
+    @Volatile var lastReportTry = 0L; private set
+    private val reportLock = Any()
+
+    /** "3m ago via tailscale", "never", or "failed 2m ago: timeout 6000ms (last ok 1h ago via lan)". */
+    fun reportSummary(): String {
+        val now = System.currentTimeMillis()
+        fun ago(t: Long) = ((now - t) / 1000).let { s -> if (s < 60) "${s}s" else if (s < 3600) "${s / 60}m" else "${s / 3600}h${(s % 3600) / 60}m" } + " ago"
+        val ok = if (lastReportAt > 0) "${ago(lastReportAt)} via $lastReportVia" else "never"
+        return if (lastReportError.isEmpty() || lastReportTry <= lastReportAt) ok else "failed ${ago(lastReportTry)}: $lastReportError" + (if (lastReportAt > 0) " (last ok $ok)" else "")
+    }
+
+    /**
+     * Tell the PC where we are (LAN / Tailscale / adb port / battery / network). Only works once paired.
+     * Independent of the shell channel, so it never waits behind a stuck ADB/helper attempt. A failed POST
+     * drops the cached route and tries once more over a fresh probe. The PC answers with its current routes,
+     * so reporting is also how a changed tunnel URL reaches the phone. Returns null when sent, else the reason.
+     */
+    fun report(ctx: Context, adbPort: Int = 0, why: String = ""): String? = synchronized(reportLock) {
+        val p = pc() ?: return "no PC link"
+        lastReportTry = System.currentTimeMillis()
         val a = Addresses.find()
         val bm = ctx.getSystemService(BatteryManager::class.java)
         val bat = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
         val body = """{"LanIP":${Json.str(a.lan ?: "")},"TailscaleIP":${Json.str(a.tailscale ?: "")},"AdbSerial":${Json.str(if (adbPort > 0 && a.lan != null) "${a.lan}:$adbPort" else "")},"Battery":"$bat","Network":${Json.str(if (a.lan != null) "wifi" else "mobile")}}"""
-        runCatching {
+        fun post(base: String): String? = runCatching {
             val c = URL("$base/phone/report").openConnection() as HttpURLConnection
-            c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 4000; c.readTimeout = 8000
-            c.setRequestProperty("Authorization", "Bearer ${p.token}")
+            c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 6000; c.readTimeout = 10_000
+            c.setRequestProperty("Authorization", "Bearer ${p.token}"); c.setRequestProperty("Content-Type", "application/json")
             c.outputStream.use { it.write(body.toByteArray()) }
-            if (c.responseCode == 200) {
-                CmdLog.add("reported to PC via $via: lan=${a.lan ?: "-"} ts=${a.tailscale ?: "-"}")
-                // The PC may answer with its current routes ({"routes":{"tunnel_url":…,"public_host":…}} or the keys at top level).
-                val reply = runCatching { c.inputStream.bufferedReader().readText() }.getOrDefault("")
-                if (reply.trim().startsWith("{")) runCatching { Json.parse(reply).asMap() }.getOrNull()?.let { r -> merge(r["routes"]?.asMap() ?: r) }
-            }
+            val code = c.responseCode
+            if (code != 200) return@runCatching "HTTP $code"
+            // The PC may answer with its current routes ({"routes":{"tunnel_url":…,"public_host":…}} or the keys at top level).
+            val reply = runCatching { c.inputStream.bufferedReader().readText() }.getOrDefault("")
+            if (reply.trim().startsWith("{")) runCatching { Json.parse(reply).asMap() }.getOrNull()?.let { r -> merge(r["routes"]?.asMap() ?: r) }
+            null
+        }.getOrElse { Routes.reason(it, 6000) }
+        var route = reach()
+        var err = route?.let { post(it.first) } ?: "no route answered"
+        if (err != null) {
+            cachedBase = null
+            route = reach(force = true)
+            err = route?.let { post(it.first) } ?: "no route answered (${p.summary()})"
+        }
+        val tag = if (why.isEmpty()) "" else " ($why)"
+        if (err == null) {
+            lastReportAt = System.currentTimeMillis(); lastReportVia = route!!.second; lastReportError = ""
+            CmdLog.add("reported to PC via ${route.second}$tag: lan=${a.lan ?: "-"} ts=${a.tailscale ?: "-"} net=${if (a.lan != null) "wifi" else "mobile"}")
+        } else {
+            lastReportError = err
+            CmdLog.add("report to PC failed$tag: $err")
+        }
+        err
+    }
+
+    private val reporter = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "pc-report").apply { isDaemon = true } }
+    @Volatile private var reportQueued = false
+
+    /** Report in the background, coalescing bursts (several network callbacks in a row become one report). */
+    fun reportSoon(ctx: Context, why: String, delayMs: Long = 0) {
+        if (reportQueued) return
+        reportQueued = true
+        reporter.execute {
+            try { if (delayMs > 0) Thread.sleep(delayMs) } catch (_: InterruptedException) {}
+            reportQueued = false
+            try { report(ctx, why = why) } catch (_: Exception) {}
         }
     }
 

@@ -2,6 +2,7 @@ package com.qcenaman.adbsaver.engine
 
 import android.content.Context
 import com.qcenaman.adbsaver.adb.AdbManager
+import com.qcenaman.adbsaver.net.LinkKeeper
 
 /**
  * Shell access as the "shell" (uid 2000) user — the power Shizuku grants, without Shizuku.
@@ -24,6 +25,11 @@ object Shell {
         if (HelperClient.alive()) {
             val c = HelperClient.exec(cmd, onPid, onData)
             if (c != -1) return c
+        }
+        // Without Wi-Fi there is no adbd to start the helper or run through, so don't spend 20 s discovering that.
+        if (!LinkKeeper.wifiUp(ctx) && !AdbManager.get(ctx).isConnected) {
+            lastError = "no shell channel: helper down and no Wi-Fi (Wireless debugging needs Wi-Fi; the helper comes back on the next Wi-Fi connection)"
+            val m = lastError.toByteArray(); onData(m, m.size); return -1
         }
         // Getting a channel (starting the helper, reconnecting ADB) takes locks and can stall on an odd network;
         // bound it so one stuck attempt cannot queue every tool behind it forever.
