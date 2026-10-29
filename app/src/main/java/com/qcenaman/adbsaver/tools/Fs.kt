@@ -1,20 +1,23 @@
 package com.qcenaman.adbsaver.tools
 
+import android.os.Environment
 import com.qcenaman.adbsaver.mcp.*
 import java.io.File
 
 /** Phone-storage tools: find / read / write / scan. Paths default to shared storage. */
 object Fs {
+    private val shared: String get() = Environment.getExternalStorageDirectory().path
+
     private fun resolve(p: String): File {
         var s = p.trim()
-        if (s.startsWith("~")) s = "/sdcard" + s.drop(1)
-        if (!s.startsWith("/")) s = "/sdcard/$s"
+        if (s.startsWith("~")) s = shared + s.drop(1)
+        if (!s.startsWith("/")) s = "$shared/$s"
         return File(s)
     }
 
     val find = Tool("find", "Find files by name/text under one or more paths.",
         """{"type":"object","properties":{"path":{"type":"array","items":{"type":"string"}},"name":{"type":"string"},"text":{"type":"string"},"limit":{"type":"integer"},"recursive":{"type":"boolean"}},"required":["path"]}""") { a ->
-        val roots = a.list("path").map { it.toString() }.ifEmpty { listOf("/sdcard") }
+        val roots = a.list("path").map { it.toString() }.ifEmpty { listOf(shared) }
         val name = a.string("name"); val text = a.string("text")
         val limit = a.int("limit", 200); val rec = a.bool("recursive", true)
         val hits = ArrayList<String>()

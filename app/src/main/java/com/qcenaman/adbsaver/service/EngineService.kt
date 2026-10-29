@@ -7,8 +7,9 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import com.qcenaman.adbsaver.CmdLog
 import com.qcenaman.adbsaver.Prefs
@@ -20,6 +21,14 @@ import com.qcenaman.adbsaver.net.LinkKeeper
 class EngineService : Service() {
     private var http: HttpServer? = null
     private var wake: PowerManager.WakeLock? = null
+    private val handler = Handler(Looper.getMainLooper())
+    /** Re-acquires the wake lock with a timeout while the engine runs, so a crash can never leave it held forever. */
+    private val renewWake = object : Runnable {
+        override fun run() {
+            wake?.acquire(WAKE_MS)
+            handler.postDelayed(this, WAKE_MS - 60_000L)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -29,9 +38,8 @@ class EngineService : Service() {
         ensureAccessibilityEnabled()
         if (Prefs.stayAwake && wake == null) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AdbSaver:engine").apply {
-                setReferenceCounted(false); acquire()
-            }
+            wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AdbSaver:engine").apply { setReferenceCounted(false) }
+            handler.post(renewWake)
         }
         if (http == null && !Prefs.paused) {
             http = HttpServer(this, Prefs.port).also { try { it.start(); CmdLog.add("http server on :${Prefs.port}") } catch (e: Exception) { CmdLog.add("http start failed: ${e.message}") } }
@@ -43,6 +51,7 @@ class EngineService : Service() {
     override fun onDestroy() {
         http?.stop(); http = null
         LinkKeeper.stop()
+        handler.removeCallbacks(renewWake)
         wake?.let { if (it.isHeld) it.release() }; wake = null
         super.onDestroy()
     }
@@ -74,12 +83,10 @@ class EngineService : Service() {
 
     private fun buildNotification(): Notification {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= 26) {
-            nm.createNotificationChannel(
-                NotificationChannel(CH, "AdbSaver engine", NotificationManager.IMPORTANCE_LOW).apply {
-                    setShowBadge(false); description = "Keeps the phone engine reachable."
-                })
-        }
+        nm.createNotificationChannel(
+            NotificationChannel(CH, "AdbSaver engine", NotificationManager.IMPORTANCE_LOW).apply {
+                setShowBadge(false); description = "Keeps the phone engine reachable."
+            })
         fun action(label: String, what: String): Notification.Action {
             val pi = PendingIntent.getBroadcast(this, what.hashCode(),
                 Intent(this, ActionReceiver::class.java).setAction(what),
@@ -87,7 +94,7 @@ class EngineService : Service() {
             return Notification.Action.Builder(null, label, pi).build()
         }
         val state = when { Prefs.paused -> "Paused"; else -> "Running · :${Prefs.port}" }
-        val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CH) else @Suppress("DEPRECATION") Notification.Builder(this)
+        val b = Notification.Builder(this, CH)
         return b.setContentTitle("AdbSaver")
             .setContentText(state)
             .setSmallIcon(R.drawable.ic_engine)
@@ -99,10 +106,11 @@ class EngineService : Service() {
 
     companion object {
         const val CH = "engine"; const val NOTIF_ID = 42
+        private const val WAKE_MS = 10 * 60_000L
         fun start(c: Context) {
             if (Prefs.killed) return
             val i = Intent(c, EngineService::class.java)
-            if (Build.VERSION.SDK_INT >= 26) c.startForegroundService(i) else c.startService(i)
+            c.startForegroundService(i)
         }
         fun refresh(c: Context) {
             val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

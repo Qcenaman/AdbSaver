@@ -4,7 +4,6 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import android.graphics.Rect
-import android.os.Build
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import java.util.concurrent.CountDownLatch
@@ -22,7 +21,6 @@ class A11yService : AccessibilityService() {
     /** Flat list of meaningful elements: "label [l,t,r,b]". */
     fun elements(): List<El> {
         val out = ArrayList<El>()
-        val windows = if (Build.VERSION.SDK_INT >= 21) windows else null
         val roots = windows?.mapNotNull { it.root } ?: listOfNotNull(rootInActiveWindow)
         for (r in roots) walk(r, out)
         return out
