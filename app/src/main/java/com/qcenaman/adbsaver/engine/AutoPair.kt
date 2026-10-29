@@ -33,7 +33,7 @@ object AutoPair {
     const val MAX_ATTEMPTS = 3
     const val RETRY_MS = 30 * 60_000L
     const val WARN_MS = 20_000L
-    private const val NOTIF_ID = 43
+    private const val NOTIF_ID = 44
 
     /** May auto-pair run now? Not while the user said "not now" recently, and not after [MAX_ATTEMPTS] failures. */
     fun due(): Boolean = attempts < MAX_ATTEMPTS && System.currentTimeMillis() - lastAttempt > RETRY_MS
@@ -65,7 +65,18 @@ object AutoPair {
         try {
             val a11y = A11yService.instance ?: run { lastResult = "accessibility service off"; CmdLog.add("autopair: $lastResult"); return false }
             // Warn first: it is about to take over the screen, and the user may be using the phone.
-            if (!warnAndWait(ctx, nm)) { lastResult = "postponed by user"; CmdLog.add("autopair: $lastResult (retry in ${RETRY_MS / 60_000} min)"); return false }
+            if (!warnAndWait(ctx, nm)) {
+                if (decision == "manual") {
+                    // The user does it: open Developer options for them and ask for the code the moment the pairing dialog is up.
+                    lastResult = "manual pairing chosen"; CmdLog.add("autopair: $lastResult"); attempts = MAX_ATTEMPTS
+                    com.qcenaman.adbsaver.adb.Pairing.startWatching(ctx)
+                    openWirelessDebugging(ctx)
+                    nm.notify(NOTIF_ID, Notification.Builder(ctx, App.CH_PAIR).setSmallIcon(R.drawable.ic_engine)
+                        .setContentTitle("Pair by hand").setContentText("Wireless debugging → Pair device with pairing code; a notification will ask for the code.").setAutoCancel(true).build())
+                    return false
+                }
+                lastResult = "postponed by user"; CmdLog.add("autopair: $lastResult (retry in ${RETRY_MS / 60_000} min)"); return false
+            }
             attempts++
             nm.notify(NOTIF_ID, Notification.Builder(ctx, App.CH_PAIR).setSmallIcon(R.drawable.ic_engine)
                 .setContentTitle("AdbSaver is pairing — hands off the phone").setContentText("About 15 seconds; it goes back home when done.")
@@ -108,12 +119,12 @@ object AutoPair {
             val left = ((end - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
             nm.notify(NOTIF_ID, Notification.Builder(ctx, App.CH_PAIR).setSmallIcon(R.drawable.ic_engine)
                 .setContentTitle("AdbSaver will pair itself in ${left}s")
-                .setContentText("It will open Settings and tap Wireless debugging. Put the phone down, or tap Not now.")
-                .setOnlyAlertOnce(true).addAction(action("Pair now", ActionReceiver.AUTOPAIR_NOW)).addAction(action("Not now", ActionReceiver.AUTOPAIR_SKIP)).build())
+                .setContentText("It will open Settings and tap Wireless debugging. Put the phone down, or choose Manually / Not now.")
+                .setOnlyAlertOnce(true).addAction(action("Pair now", ActionReceiver.AUTOPAIR_NOW)).addAction(action("Manually", ActionReceiver.AUTOPAIR_MANUAL)).addAction(action("Not now", ActionReceiver.AUTOPAIR_SKIP)).build())
             Thread.sleep(1000)
         }
         nm.cancel(NOTIF_ID)
-        return decision != "skip"
+        return decision == null || decision == "now"
     }
 
     /** Samsung routes the WirelessDebugging activity to Settings home, so always go via Developer options. */

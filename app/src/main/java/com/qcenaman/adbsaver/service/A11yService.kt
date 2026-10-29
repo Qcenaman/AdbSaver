@@ -92,11 +92,16 @@ class A11yService : AccessibilityService() {
      */
     fun scrollToFind(text: String, maxPages: Int = 12): Boolean {
         if (findNode(text) != null) return true
+        val w = resources.displayMetrics.widthPixels; val h = resources.displayMetrics.heightPixels
+        var useDrag = false
         repeat(maxPages) {
-            val list = scrollable(rootInActiveWindow) ?: return scrollToText(text, maxPages)
-            if (!list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) return false
+            val before = elements().map { it.label }
+            val list = if (useDrag) null else scrollable(rootInActiveWindow)
+            if (list == null || !list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) { useDrag = true; slowDrag(w / 2f, h * 0.75f, w / 2f, h * 0.30f) }
             Thread.sleep(600)
             if (findNode(text) != null) return true
+            val after = elements().map { it.label }
+            if (after == before) { if (useDrag) return false; useDrag = true } // the scroll action did nothing on this list: drag instead
         }
         return false
     }
