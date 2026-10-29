@@ -12,6 +12,7 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_LOCKED_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {}
             else -> return
         }
+        if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) Thread { com.qcenaman.adbsaver.engine.HelperClient.restart() }.start()
         if (!Prefs.killed) EngineService.start(context.applicationContext)
     }
 }

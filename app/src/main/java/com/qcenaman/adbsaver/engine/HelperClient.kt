@@ -49,6 +49,16 @@ object HelperClient {
         } catch (_: Exception) { return -1 } finally { try { s.close() } catch (_: Exception) {} }
     }
 
+    /** Ask the running helper to exit; its supervisor loop starts a fresh one from the current APK (used after an update). */
+    fun restart(): Boolean {
+        val s = connect() ?: return false
+        return try {
+            val out = DataOutputStream(s.getOutputStream())
+            out.write((Prefs.token + "\n").toByteArray()); val c = "__exit__".toByteArray(); out.writeInt(c.size); out.write(c); out.flush()
+            CmdLog.add("shell helper asked to restart from the new APK"); true
+        } catch (_: Exception) { false } finally { try { s.close() } catch (_: Exception) {} }
+    }
+
     private fun int(b: ByteArray) = ((b[0].toInt() and 255) shl 24) or ((b[1].toInt() and 255) shl 16) or ((b[2].toInt() and 255) shl 8) or (b[3].toInt() and 255)
 
     /** Launch the helper as the shell user over the ADB channel; detached so it survives adbd. */
@@ -57,8 +67,9 @@ object HelperClient {
         if (alive()) return true
         val adb = AdbManager.get(ctx)
         if (!adb.ensureConnected(ctx)) return false
-        val apk = ctx.applicationInfo.sourceDir
-        val cmd = "CLASSPATH=$apk nohup setsid app_process /system/bin com.qcenaman.adbsaver.helper.Main ${Prefs.token} >/dev/null 2>&1 &"
+        // A supervisor loop (shell user, detached from adbd) restarts the helper within 5 s if it ever dies, and looks the
+        // APK path up each time, so after an app update the helper comes back from the new APK — all without Wi-Fi.
+        val cmd = "nohup setsid sh -c 'while :; do CLASSPATH=\$(pm path ${ctx.packageName} | head -1 | cut -d: -f2) app_process /system/bin com.qcenaman.adbsaver.helper.Main ${Prefs.token}; sleep 5; done' >/dev/null 2>&1 &"
         return try {
             // A helper from an older build (or one the app cannot reach) would block the port: replace it.
             adb.capture("for p in \$(pgrep -f com.qcenaman.adbsaver.helper.Main); do [ \$p != \$\$ ] && kill -9 \$p; done 2>/dev/null; sleep 0.3\n$cmd\nsleep 1; echo started")
