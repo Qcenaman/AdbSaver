@@ -18,6 +18,8 @@ class ActionReceiver : BroadcastReceiver() {
                 Prefs.killed = true; CmdLog.add("killed from notification")
                 context.stopService(Intent(context, EngineService::class.java))
             }
+            AUTOPAIR_NOW -> com.qcenaman.adbsaver.engine.AutoPair.decision = "now"
+            AUTOPAIR_SKIP -> com.qcenaman.adbsaver.engine.AutoPair.decision = "skip"
             PAIR_CODE -> {
                 val code = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(Pairing.KEY_CODE)?.toString().orEmpty()
                 val port = intent.getIntExtra("port", -1)
@@ -29,5 +31,7 @@ class ActionReceiver : BroadcastReceiver() {
         const val PAUSE = "com.qcenaman.adbsaver.PAUSE"
         const val KILL = "com.qcenaman.adbsaver.KILL"
         const val PAIR_CODE = "com.qcenaman.adbsaver.PAIR_CODE"
+        const val AUTOPAIR_NOW = "com.qcenaman.adbsaver.AUTOPAIR_NOW"
+        const val AUTOPAIR_SKIP = "com.qcenaman.adbsaver.AUTOPAIR_SKIP"
     }
 }

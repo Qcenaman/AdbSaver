@@ -71,6 +71,43 @@ class A11yService : AccessibilityService() {
 
     private fun visible(text: String) = elements().any { it.label.contains(text, true) }
 
+    /** A node whose text/description contains [text], searched through the whole tree of the active window. */
+    fun findNode(text: String): AccessibilityNodeInfo? {
+        val root = rootInActiveWindow ?: return null
+        return root.findAccessibilityNodeInfosByText(text)?.firstOrNull { it.isVisibleToUser }
+            ?: elements().firstOrNull { it.label.contains(text, true) }?.node
+    }
+
+    /** Click the node found by [findNode] (or its nearest clickable parent). */
+    fun clickFound(text: String): Boolean {
+        var node = findNode(text) ?: return false
+        val b = Rect(); node.getBoundsInScreen(b)
+        while (!node.isClickable) node = node.parent ?: return tapAt(b.centerX(), b.centerY())
+        return node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    }
+
+    /**
+     * Page through the first scrollable list with the accessibility scroll action (no finger gestures) until
+     * [text] is in the tree; stops at the first hit, so it never runs past the row it is looking for.
+     */
+    fun scrollToFind(text: String, maxPages: Int = 12): Boolean {
+        if (findNode(text) != null) return true
+        repeat(maxPages) {
+            val list = scrollable(rootInActiveWindow) ?: return scrollToText(text, maxPages)
+            if (!list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) return false
+            Thread.sleep(600)
+            if (findNode(text) != null) return true
+        }
+        return false
+    }
+
+    private fun scrollable(n: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (n == null) return null
+        if (n.isScrollable) return n
+        for (i in 0 until n.childCount) scrollable(n.getChild(i))?.let { return it }
+        return null
+    }
+
     /** Scroll with slow drags that end at rest (no fling) until [text] is on screen. */
     fun scrollToText(text: String, maxPages: Int = 25): Boolean {
         if (visible(text)) return true

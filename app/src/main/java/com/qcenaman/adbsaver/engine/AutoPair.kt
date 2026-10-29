@@ -1,8 +1,14 @@
 package com.qcenaman.adbsaver.engine
 
+import android.app.Notification
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
+import com.qcenaman.adbsaver.App
+import com.qcenaman.adbsaver.R
+import com.qcenaman.adbsaver.service.ActionReceiver
 import com.qcenaman.adbsaver.CmdLog
 import com.qcenaman.adbsaver.adb.AdbManager
 import com.qcenaman.adbsaver.service.A11yService
@@ -21,6 +27,16 @@ object AutoPair {
     private val busy = AtomicBoolean(false)
     @Volatile var lastAttempt = 0L
     @Volatile var lastResult = ""
+    /** "now" / "skip" from the warning notification's buttons. */
+    @Volatile var decision: String? = null
+    @Volatile var attempts = 0
+    const val MAX_ATTEMPTS = 3
+    const val RETRY_MS = 30 * 60_000L
+    const val WARN_MS = 20_000L
+    private const val NOTIF_ID = 43
+
+    /** May auto-pair run now? Not while the user said "not now" recently, and not after [MAX_ATTEMPTS] failures. */
+    fun due(): Boolean = attempts < MAX_ATTEMPTS && System.currentTimeMillis() - lastAttempt > RETRY_MS
 
     private val codeRe = Regex("""^\d{6}$""")
     private val hostPortRe = Regex("""(\d{1,3}(?:\.\d{1,3}){3}):(\d{2,5})""")
@@ -45,17 +61,25 @@ object AutoPair {
     fun auto(ctx: Context): Boolean {
         if (!busy.compareAndSet(false, true)) return false
         lastAttempt = System.currentTimeMillis()
+        val nm = ctx.getSystemService(NotificationManager::class.java)
         try {
             val a11y = A11yService.instance ?: run { lastResult = "accessibility service off"; CmdLog.add("autopair: $lastResult"); return false }
-            CmdLog.add("autopair: opening wireless debugging")
+            // Warn first: it is about to take over the screen, and the user may be using the phone.
+            if (!warnAndWait(ctx, nm)) { lastResult = "postponed by user"; CmdLog.add("autopair: $lastResult (retry in ${RETRY_MS / 60_000} min)"); return false }
+            attempts++
+            nm.notify(NOTIF_ID, Notification.Builder(ctx, App.CH_PAIR).setSmallIcon(R.drawable.ic_engine)
+                .setContentTitle("AdbSaver is pairing — hands off the phone").setContentText("About 15 seconds; it goes back home when done.")
+                .setOngoing(true).build())
+            CmdLog.add("autopair: opening wireless debugging (attempt $attempts/$MAX_ATTEMPTS)")
             openWirelessDebugging(ctx)
             // Make sure the toggle is on, then open the pairing-code dialog.
             if (!waitFor(a11y, 4000) { labels -> labels.any { it.contains("pairing code", true) } }) {
-                // Landed on Developer options: find the row and open its page.
-                if (a11y.scrollToText("Wireless debugging")) { Thread.sleep(400); a11y.tapLabel("Wireless debugging") }
+                // Landed on Developer options: find the row (a tree search, not a visual one) and open its page.
+                if (a11y.scrollToFind("Wireless debugging", maxPages = 12)) { Thread.sleep(400); a11y.clickFound("Wireless debugging") }
+                else { lastResult = "Wireless debugging not found in Developer options"; CmdLog.add("autopair: $lastResult"); goHome(a11y); return false }
                 waitFor(a11y, 5000) { labels -> labels.any { it.contains("pairing code", true) } }
             }
-            val opened = listOf("Pair device with pairing code", "Pair with pairing code", "pairing code").any { a11y.tapLabel(it) }
+            val opened = listOf("Pair device with pairing code", "Pair with pairing code", "pairing code").any { a11y.clickFound(it) }
             if (!opened) {
                 lastResult = "pairing option not found on screen"; CmdLog.add("autopair: $lastResult"); goHome(a11y); return false
             }
@@ -69,8 +93,27 @@ object AutoPair {
             CmdLog.add("autopair: code read, port ${port.takeIf { it > 0 } ?: "mdns"}")
             val ok = pairWithCode(ctx, code, host, port)
             goHome(a11y)
+            if (ok) attempts = 0
             return ok
-        } finally { busy.set(false) }
+        } finally { nm.cancel(NOTIF_ID); busy.set(false) }
+    }
+
+    /** Heads-up with a countdown; "Pair now" goes at once, "Not now" postpones. True when it may proceed. */
+    private fun warnAndWait(ctx: Context, nm: NotificationManager): Boolean {
+        decision = null
+        fun action(label: String, act: String) = Notification.Action.Builder(null, label,
+            PendingIntent.getBroadcast(ctx, act.hashCode(), Intent(ctx, ActionReceiver::class.java).setAction(act), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)).build()
+        val end = System.currentTimeMillis() + WARN_MS
+        while (System.currentTimeMillis() < end && decision == null) {
+            val left = ((end - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
+            nm.notify(NOTIF_ID, Notification.Builder(ctx, App.CH_PAIR).setSmallIcon(R.drawable.ic_engine)
+                .setContentTitle("AdbSaver will pair itself in ${left}s")
+                .setContentText("It will open Settings and tap Wireless debugging. Put the phone down, or tap Not now.")
+                .setOnlyAlertOnce(true).addAction(action("Pair now", ActionReceiver.AUTOPAIR_NOW)).addAction(action("Not now", ActionReceiver.AUTOPAIR_SKIP)).build())
+            Thread.sleep(1000)
+        }
+        nm.cancel(NOTIF_ID)
+        return decision != "skip"
     }
 
     /** Samsung routes the WirelessDebugging activity to Settings home, so always go via Developer options. */

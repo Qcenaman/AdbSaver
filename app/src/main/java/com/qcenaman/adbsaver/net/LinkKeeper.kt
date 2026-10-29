@@ -90,9 +90,7 @@ object LinkKeeper {
         if (!wifiUp) return // adbd only listens on Wi-Fi; nothing to do until it returns
         enableWirelessDebugging(ctx)
         if (Shell.ready(ctx)) { HelperClient.ensureStarted(ctx); return }
-        if (AdbManager.get(ctx).needsPairing && System.currentTimeMillis() - AutoPair.lastAttempt > 10 * 60_000L) {
-            AutoPair.auto(ctx)
-        }
+        if (AdbManager.get(ctx).needsPairing && AutoPair.due()) AutoPair.auto(ctx)
     }
 
     /** Needs WRITE_SECURE_SETTINGS (granted once over adb: pm grant … WRITE_SECURE_SETTINGS). */
