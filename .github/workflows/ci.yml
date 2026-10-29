@@ -9,8 +9,9 @@ jobs:
       - uses: actions/checkout@v4
         with: { path: AdbSaver }
       - name: Check TokenSaver access
-        if: ${{ secrets.TOKENSAVER_READ_TOKEN == '' }}
+        env: { TOKENSAVER_READ_TOKEN: "${{ secrets.TOKENSAVER_READ_TOKEN }}" }
         run: |
+          [ -n "$TOKENSAVER_READ_TOKEN" ] && exit 0
           echo "::error::Secret TOKENSAVER_READ_TOKEN is missing. The APK embeds the Go engine from the private Qcenaman/TokenSaver repo, so this build needs a fine-grained PAT with Contents: read on TokenSaver, saved as a repository secret named TOKENSAVER_READ_TOKEN in AdbSaver (Settings > Secrets and variables > Actions)."
           exit 1
       - uses: actions/checkout@v4
