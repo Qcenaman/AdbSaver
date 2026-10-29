@@ -32,7 +32,9 @@ class HttpServer(private val ctx: Context, port: Int) : NanoHTTPD(port) {
             // No token: a route refresh from an already-paired PC (e.g. a new tunnel URL).
             val m = runCatching { com.qcenaman.adbsaver.mcp.Json.parse(json).asMap() }.getOrNull()
                 ?: return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "bad json")
-            if (PcLink.pc() == null) return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "token missing")
+            // Not paired yet: the PC must send the full link (token, port, lan_ip, tailscale_ip, mac, name) over any route it
+            // has — this needs no ADB, only the phone's own access token from the app screen in the Authorization header.
+            if (PcLink.pc() == null) return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "no PC link yet: POST the full link (with token) to /link")
             PcLink.merge(m["routes"]?.asMap() ?: m)
             return newFixedLengthResponse(Response.Status.OK, "text/plain", "ok")
         }

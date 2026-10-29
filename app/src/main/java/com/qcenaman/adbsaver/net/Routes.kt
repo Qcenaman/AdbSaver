@@ -30,10 +30,23 @@ object Routes {
     fun of(lanIp: String, tsIp: String, publicHost: String, tunnelUrl: String, port: Int): List<Route> {
         val out = ArrayList<Route>(4)
         if (lanIp.isNotEmpty()) out += Route("lan", "http://$lanIp:$port", 1500)
-        if (tsIp.isNotEmpty()) out += Route("tailscale", "http://$tsIp:$port", 4000)
+        if (tsIp.isNotEmpty()) out += Route("tailscale", "http://$tsIp:$port", 6000)
         publicBase(publicHost, port)?.let { out += Route("public", it, 5000) }
         tunnelBase(tunnelUrl)?.let { out += Route("tunnel", it, 8000) }
         return out
+    }
+
+    /** A probe failure as a few words for pc status: "timeout", "connect refused", "no route to host", "dns", or the exception's message. */
+    fun reason(e: Throwable, timeoutMs: Int): String {
+        val m = (e.message ?: "").lowercase()
+        return when {
+            e is java.net.SocketTimeoutException || "timed out" in m || "timeout" in m -> "timeout"
+            e is java.net.UnknownHostException -> "dns"
+            "refused" in m -> "connect refused"
+            "unreachable" in m || "no route" in m || "enetunreach" in m || "ehostunreach" in m -> "no route to host"
+            "reset" in m -> "connection reset"
+            else -> e.javaClass.simpleName.removeSuffix("Exception").ifEmpty { "error" } + (e.message?.let { ": ${it.take(60)}" } ?: "")
+        }.let { if (it == "timeout") "timeout ${timeoutMs}ms" else it }
     }
 
     /** Host part of a public route (for Wake-on-LAN to a router that forwards UDP 9), or null. */

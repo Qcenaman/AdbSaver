@@ -6,16 +6,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { path: AdbSaver }
+      - name: Check TokenSaver access
+        if: ${{ secrets.TOKENSAVER_READ_TOKEN == '' }}
+        run: |
+          echo "::error::Secret TOKENSAVER_READ_TOKEN is missing. The APK embeds the Go engine from the private Qcenaman/TokenSaver repo, so this build needs a fine-grained PAT with Contents: read on TokenSaver, saved as a repository secret named TOKENSAVER_READ_TOKEN in AdbSaver (Settings > Secrets and variables > Actions)."
+          exit 1
       - uses: actions/checkout@v4
-        with: { repository: Qcenaman/TokenSaver, path: TokenSaver, token: "${{ secrets.TOKENSAVER_READ_TOKEN || github.token }}" }
+        with: { repository: Qcenaman/TokenSaver, path: TokenSaver, token: "${{ secrets.TOKENSAVER_READ_TOKEN }}" }
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: "17" }
       - uses: actions/setup-go@v5
-        with: { go-version: "1.24" }
+        with: { go-version-file: TokenSaver/go.mod, cache-dependency-path: TokenSaver/go.sum }
       - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
       - name: Unit tests and debug build
         working-directory: AdbSaver
         run: gradle :app:testDebugUnitTest :app:assembleDebug --no-daemon --console=plain -Ptokensaver.dir=../TokenSaver
+      - name: Name the APK after the commit
+        run: cp AdbSaver/app/build/outputs/apk/debug/app-debug.apk AdbSaver-${GITHUB_SHA::7}.apk
       - uses: actions/upload-artifact@v4
-        with: { name: app-debug, path: AdbSaver/app/build/outputs/apk/debug/app-debug.apk }
+        with: { name: app-debug, path: AdbSaver-*.apk, retention-days: 30 }

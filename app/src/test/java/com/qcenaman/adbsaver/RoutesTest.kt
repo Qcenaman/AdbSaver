@@ -30,4 +30,11 @@ class RoutesTest {
         assertEquals("1.2.3.4", Routes.publicHostOnly("http://1.2.3.4:8766/"))
         assertNull(Routes.publicHostOnly(""))
     }
+
+    @Test fun probeReasonsAreShort() {
+        assertEquals("timeout 4000ms", Routes.reason(java.net.SocketTimeoutException("connect timed out"), 4000))
+        assertEquals("connect refused", Routes.reason(java.net.ConnectException("Connection refused"), 1500))
+        assertEquals("dns", Routes.reason(java.net.UnknownHostException("pc.example.com"), 5000))
+        assertEquals("no route to host", Routes.reason(java.net.SocketException("ENETUNREACH (Network is unreachable)"), 1500))
+    }
 }

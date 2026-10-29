@@ -70,11 +70,15 @@ object PcLink {
     @Volatile private var cachedBase: String? = null
     @Volatile private var cachedAt = 0L
 
-    private fun health(base: String, ms: Int): Boolean = runCatching {
+    /** GET base/health: null when it answers 200, else a short reason ("timeout", "HTTP 502", "connect refused" …). */
+    private fun probe(base: String, ms: Int): String? = runCatching {
         val c = URL("$base/health").openConnection() as HttpURLConnection
         c.connectTimeout = ms; c.readTimeout = ms
-        c.responseCode == 200
-    }.getOrDefault(false)
+        val code = c.responseCode
+        if (code == 200) null else "HTTP $code"
+    }.getOrElse { Routes.reason(it, ms) }
+
+    private fun health(base: String, ms: Int): Boolean = probe(base, ms) == null
 
     @Volatile private var cachedVia = ""
 
@@ -88,12 +92,26 @@ object PcLink {
         return null
     }
 
-    /** Every route with whether it answers right now (pc status). */
+    /**
+     * Every route with whether it answers right now (pc status): all probed at once, never from the cache, and a
+     * route that only timed out gets a second try with double the timeout (an idle Tailscale link needs a moment
+     * to wake). Shows the reason when down, the time when up, and marks the route calls currently use.
+     */
     fun probeAll(): String {
         val p = pc() ?: return "no PC link"
         val rs = p.routes()
         if (rs.isEmpty()) return "no routes known"
-        return rs.joinToString("\n") { r -> "${r.via.padEnd(9)} ${r.base}  ${if (health(r.base, r.timeoutMs)) "up" else "down"}" }
+        val results = arrayOfNulls<String>(rs.size)
+        val threads = rs.mapIndexed { i, r -> Thread {
+            val t0 = System.currentTimeMillis()
+            var why = probe(r.base, r.timeoutMs)
+            if (why?.startsWith("timeout") == true) why = probe(r.base, r.timeoutMs * 2)?.let { "$it (2 tries)" }
+            val ms = System.currentTimeMillis() - t0
+            results[i] = if (why == null) "up ${ms}ms" else "down: $why"
+        }.apply { start() } }
+        threads.forEach { it.join() }
+        val using = if (cachedBase != null && System.currentTimeMillis() - cachedAt < 60_000) cachedVia else ""
+        return rs.mapIndexed { i, r -> "${r.via.padEnd(9)} ${r.base}  ${results[i]}${if (r.via == using) "  (in use)" else ""}" }.joinToString("\n")
     }
 
     /** One MCP tools/call on the PC. */
