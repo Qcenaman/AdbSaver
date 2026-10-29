@@ -97,6 +97,12 @@ object Pairing {
 
     fun shellState(ctx: Context): String = runCatching {
         val m = AdbManager.get(ctx)
-        when { m.isConnected -> "shell connected"; m.ensureConnected(ctx) -> "shell connected"; else -> "shell not connected" }
+        // Read-only: the screen must not start connect attempts every few seconds (they hold the ADB lock and starve LinkKeeper's repair/auto-pair).
+        when {
+            com.qcenaman.adbsaver.engine.HelperClient.alive() -> "shell connected (helper)"
+            m.isConnected -> "shell connected (adb)"
+            m.needsPairing -> "shell not connected — pairing required"
+            else -> "shell not connected"
+        }
     }.getOrElse { "shell: ${it.message}" }
 }
