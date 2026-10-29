@@ -30,12 +30,13 @@ object LinkKeeper {
         cm.registerNetworkCallback(
             NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(),
             object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(n: Network) { wifiUp = true; CmdLog.add("wifi up"); Thread { repair(ctx) }.start() }
-                override fun onLost(n: Network) { wifiUp = false; CmdLog.add("wifi lost — shell stays on the helper if it is up") }
+                override fun onAvailable(n: Network) { wifiUp = true; CmdLog.add("wifi up"); Thread { repair(ctx); PcLink.report(ctx) }.start() }
+                override fun onLost(n: Network) { wifiUp = false; CmdLog.add("wifi lost — shell stays on the helper if it is up"); Thread { Thread.sleep(5000); PcLink.report(ctx) }.start() }
             })
         Thread {
+            var n = 0
             while (running) {
-                try { repair(ctx) } catch (_: Exception) {}
+                try { repair(ctx); if (n++ % 20 == 0) PcLink.report(ctx) } catch (_: Exception) {}
                 Thread.sleep(45_000)
             }
         }.apply { isDaemon = true; name = "link-keeper" }.start()

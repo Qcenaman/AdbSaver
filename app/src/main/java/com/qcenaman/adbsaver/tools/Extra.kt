@@ -28,5 +28,21 @@ object Extra {
         }
     }
 
-    val all = listOf(localAi, saved)
+    val pc = Tool("pc", "The user's desktop PC through its TokenSaver (all its tools: scan find read run run_job job system web window browser media office rag local_ai saved check). Pass tool + args to call one; reached over LAN, else Tailscale. action status/wake (Wake-on-LAN from the home Wi-Fi).",
+        """{"type":"object","properties":{"action":{"type":"string","enum":["call","status","wake"]},"tool":{"type":"string"},"args":{"type":"object"}}}""") { a ->
+        when (a.string("action", "call").lowercase()) {
+            "status" -> {
+                val p = com.qcenaman.adbsaver.net.PcLink.pc() ?: return@Tool ToolResult.err("no PC link yet (run `phone pair` on the PC while the phone is on the LAN)")
+                val r = com.qcenaman.adbsaver.net.PcLink.reach(force = true)
+                ToolResult.ok("pc=${p.name} lan=${p.lanIp.ifEmpty { "-" }} tailscale=${p.tsIp.ifEmpty { "-" }} port=${p.port}\nreachable: ${r?.second ?: "no"}")
+            }
+            "wake" -> ToolResult.ok(com.qcenaman.adbsaver.net.PcLink.wake())
+            else -> {
+                val tool = a.string("tool"); if (tool.isEmpty()) return@Tool ToolResult.err("tool required")
+                com.qcenaman.adbsaver.net.PcLink.call(tool, com.qcenaman.adbsaver.mcp.Json.encode(a["args"] ?: emptyMap<String, Any?>()))
+            }
+        }
+    }
+
+    val all = listOf(localAi, saved, pc)
 }

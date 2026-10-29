@@ -29,3 +29,10 @@ class JsonTest {
         assertTrue(Json.parse("[1,2.5,null]") is List<*>)
     }
 }
+
+class JsonEncodeTest {
+    @Test fun encodeRoundTrip() {
+        val v = mapOf("a" to 1L, "b" to listOf("x", true, null), "c" to mapOf("d" to "q\"uote"))
+        assertEquals(v, Json.parse(Json.encode(v)))
+    }
+}

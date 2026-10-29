@@ -15,6 +15,16 @@ object Json {
 
     fun parse(s: String): Any? = Parser(s).parseValue()
 
+    fun encode(v: Any?): String = when (v) {
+        null -> "null"
+        is String -> str(v)
+        is Boolean -> v.toString()
+        is Number -> v.toString().removeSuffix(".0")
+        is Map<*, *> -> v.entries.joinToString(",", "{", "}") { str(it.key.toString()) + ":" + encode(it.value) }
+        is List<*> -> v.joinToString(",", "[", "]") { encode(it) }
+        else -> str(v.toString())
+    }
+
     class Parser(private val s: String) {
         private var i = 0
         fun parseValue(): Any? {

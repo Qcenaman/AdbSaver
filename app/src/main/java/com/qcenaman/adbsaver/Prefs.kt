@@ -60,6 +60,10 @@ object Prefs {
         get() = sp.getBoolean("setup_done", false)
         set(v) = sp.edit().putBoolean("setup_done", v).apply()
 
+    var pcLinkJson: String?
+        get() = sp.getString("pc_link", null)
+        set(v) = sp.edit().putString("pc_link", v).apply()
+
     fun toolEnabled(name: String) = sp.getBoolean("tool_$name", true)
     fun setToolEnabled(name: String, v: Boolean) = sp.edit().putBoolean("tool_$name", v).apply()
 }
