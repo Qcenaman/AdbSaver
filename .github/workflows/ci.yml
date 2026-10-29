@@ -1,5 +1,7 @@
 name: ci
 on: [push, pull_request]
+permissions:
+  contents: write
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -26,3 +28,12 @@ jobs:
         run: cp AdbSaver/app/build/outputs/apk/debug/app-debug.apk AdbSaver-${GITHUB_SHA::7}.apk
       - uses: actions/upload-artifact@v4
         with: { name: app-debug, path: AdbSaver-*.apk, retention-days: 30 }
+      - name: Release the APK (rolling "latest" on main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: AdbSaver ${{ github.sha }}
+          body: "Debug build of ${{ github.sha }}. Install: adb install -r -t AdbSaver-*.apk"
+          files: AdbSaver-*.apk
+          fail_on_unmatched_files: true
