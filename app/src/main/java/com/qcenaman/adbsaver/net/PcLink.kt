@@ -180,11 +180,11 @@ object PcLink {
             null
         }.getOrElse { Routes.reason(it, 6000) }
         var route = reach()
-        var err = route?.let { post(it.first) } ?: "no route answered"
+        var err = if (route == null) "no route answered" else post(route.first)
         if (err != null) {
             cachedBase = null
             route = reach(force = true)
-            err = route?.let { post(it.first) } ?: "no route answered (${p.summary()})"
+            err = if (route == null) "no route answered (${p.summary()})" else post(route.first)
         }
         val tag = if (why.isEmpty()) "" else " ($why)"
         if (err == null) {
