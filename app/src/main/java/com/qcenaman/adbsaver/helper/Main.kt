@@ -41,11 +41,28 @@ object Main {
             val cmd = ByteArray(n).also { inp.readFully(it) }.toString(Charsets.UTF_8)
             if (cmd == "__ping__") { frame(out, 3, intBytes(0)); s.close(); return }
             if (cmd == "__exit__") { s.close(); exitProcess(0) }
-            val p = ProcessBuilder("/system/bin/sh", "-c", cmd).redirectErrorStream(true).directory(File("/")).start()
-            frame(out, 2, intBytes(p.pid().toInt()))
+            // Android's runtime has no Process.pid(): print the shell's pid, then exec the command in its place.
+            val b64 = android.util.Base64.encodeToString(cmd.toByteArray(), android.util.Base64.NO_WRAP)
+            val wrapped = "echo __ADBSAVER_PID=\$\$; exec /system/bin/sh -c \"\$(echo $b64 | base64 -d)\""
+            val p = ProcessBuilder("/system/bin/sh", "-c", wrapped).redirectErrorStream(true).directory(File("/")).start()
             val buf = ByteArray(16384)
             p.inputStream.use { ps ->
-                while (true) { val r = ps.read(buf); if (r < 0) break; frame(out, 1, buf.copyOf(r)) }
+                var first = true
+                while (true) {
+                    val r = ps.read(buf); if (r < 0) break
+                    var off = 0; var len = r
+                    if (first) {
+                        first = false
+                        val head = String(buf, 0, r, Charsets.UTF_8)
+                        val nl = head.indexOf('\n')
+                        if (head.startsWith("__ADBSAVER_PID=") && nl > 0) {
+                            frame(out, 2, intBytes(head.substring(15, nl).trim().toIntOrNull() ?: -1))
+                            val skip = head.substring(0, nl + 1).toByteArray(Charsets.UTF_8).size
+                            off = skip; len = r - skip
+                        }
+                    }
+                    if (len > 0) frame(out, 1, buf.copyOfRange(off, off + len))
+                }
             }
             frame(out, 3, intBytes(p.waitFor()))
             out.flush()
