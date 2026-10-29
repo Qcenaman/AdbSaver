@@ -21,15 +21,34 @@ object Shell {
 
     /** Streamed execution; -1 when no channel is available. */
     fun exec(ctx: Context, cmd: String, onPid: (Int) -> Unit = {}, onData: (ByteArray, Int) -> Unit): Int {
-        if (HelperClient.alive() || HelperClient.ensureStarted(ctx)) {
+        if (HelperClient.alive()) {
             val c = HelperClient.exec(cmd, onPid, onData)
-            if (c != -1 || !AdbManager.get(ctx).ensureConnected(ctx)) return c
+            if (c != -1) return c
         }
-        if (!AdbManager.get(ctx).ensureConnected(ctx)) {
-            lastError = "no shell channel: helper down and Wireless debugging off (needs Wi-Fi once)"
-            val m = lastError.toByteArray(); onData(m, m.size); return -1
+        // Getting a channel (starting the helper, reconnecting ADB) takes locks and can stall on an odd network;
+        // bound it so one stuck attempt cannot queue every tool behind it forever.
+        val channel = withBudget(CHANNEL_BUDGET_MS) {
+            if (HelperClient.ensureStarted(ctx)) "helper" else if (AdbManager.get(ctx).ensureConnected(ctx)) "adb" else null
         }
-        return AdbManager.get(ctx).exec(cmd, onPid, onData)
+        when (channel) {
+            "helper" -> { val c = HelperClient.exec(cmd, onPid, onData); if (c != -1) return c }
+            "adb" -> return AdbManager.get(ctx).exec(cmd, onPid, onData)
+        }
+        lastError = if (channel == null && budgetHit) "shell channel busy: a previous connect attempt is still hanging (open the app or reconnect Wi-Fi)"
+            else "no shell channel: helper down and Wireless debugging off (needs Wi-Fi once)"
+        val m = lastError.toByteArray(); onData(m, m.size); return -1
+    }
+
+    const val CHANNEL_BUDGET_MS = 20_000L
+    @Volatile private var budgetHit = false
+    private val pool = java.util.concurrent.Executors.newCachedThreadPool { r -> Thread(r, "shell-channel").apply { isDaemon = true } }
+
+    /** Runs [block] on a worker and gives up after [ms]; the worker keeps going so the lock it holds is released normally. */
+    private fun <T> withBudget(ms: Long, block: () -> T?): T? {
+        val f = pool.submit(java.util.concurrent.Callable { block() })
+        return try { budgetHit = false; f.get(ms, java.util.concurrent.TimeUnit.MILLISECONDS) }
+        catch (_: java.util.concurrent.TimeoutException) { budgetHit = true; null }
+        catch (_: Exception) { null }
     }
 
     fun runBytes(ctx: Context, cmd: String): ByteArray {

@@ -12,6 +12,8 @@ import java.io.DataOutputStream
 
 /** Talks to the shell-user helper process; starts it over ADB when it is not running. */
 object HelperClient {
+    /** How long to wait for the helper's first frame (its pid) before treating it as hung. */
+    const val FIRST_FRAME_MS = 15_000
     private fun connect(): LocalSocket? = try {
         LocalSocket().also { it.connect(LocalSocketAddress(Main.SOCKET)); it.soTimeout = 0 }
     } catch (_: Exception) { null }
@@ -32,9 +34,12 @@ object HelperClient {
         try {
             val out = DataOutputStream(s.outputStream); val inp = DataInputStream(s.inputStream)
             out.write((Prefs.token + "\n").toByteArray()); val c = cmd.toByteArray(); out.writeInt(c.size); out.write(c); out.flush()
+            // The helper answers with the pid frame at once; a helper that accepted but never answers is dead, not slow.
+            s.soTimeout = FIRST_FRAME_MS
             while (true) {
                 val type = inp.read(); if (type < 0) return -1
                 val n = inp.readInt(); val payload = ByteArray(n).also { inp.readFully(it) }
+                s.soTimeout = 0
                 when (type) {
                     1 -> onData(payload, n)
                     2 -> onPid(int(payload))
