@@ -86,6 +86,7 @@ object LinkKeeper {
 
     @Synchronized
     private fun repair(ctx: Context) {
+        try { com.qcenaman.adbsaver.adb.AdbTcp.keep(ctx) } catch (_: Exception) {}
         if (HelperClient.alive()) return
         if (!wifiUp) return // adbd only listens on Wi-Fi; nothing to do until it returns
         enableWirelessDebugging(ctx)

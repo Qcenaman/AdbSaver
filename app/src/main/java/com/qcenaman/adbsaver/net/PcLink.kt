@@ -166,7 +166,7 @@ object PcLink {
         val a = Addresses.find()
         val bm = ctx.getSystemService(BatteryManager::class.java)
         val bat = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
-        val body = """{"LanIP":${Json.str(a.lan ?: "")},"TailscaleIP":${Json.str(a.tailscale ?: "")},"AdbSerial":${Json.str(if (adbPort > 0 && a.lan != null) "${a.lan}:$adbPort" else "")},"Battery":"$bat","Network":${Json.str(if (a.lan != null) "wifi" else "mobile")}}"""
+        val body = """{"LanIP":${Json.str(a.lan ?: "")},"TailscaleIP":${Json.str(a.tailscale ?: "")},"AdbSerial":${Json.str(if (adbPort > 0 && a.lan != null) "${a.lan}:$adbPort" else "")},"AdbTcp":${Json.str(if (a.tailscale != null) "${a.tailscale}:${com.qcenaman.adbsaver.adb.AdbTcp.PORT}" else "")},"Battery":"$bat","Network":${Json.str(if (a.lan != null) "wifi" else "mobile")}}"""
         fun post(base: String): String? = runCatching {
             val c = URL("$base/phone/report").openConnection() as HttpURLConnection
             c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 6000; c.readTimeout = 10_000
