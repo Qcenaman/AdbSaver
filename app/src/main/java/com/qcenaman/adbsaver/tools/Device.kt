@@ -77,7 +77,8 @@ object Device {
     }
 
     /** Download in the engine (not via shell); null on success, else an error. */
-    private fun download(url: String, dest: java.io.File): String? = try {
+    private fun download(url: String, dest: java.io.File): String? {
+        try {
         var u = java.net.URL(url); var hops = 0
         while (true) {
             val c = u.openConnection() as java.net.HttpURLConnection
@@ -97,8 +98,8 @@ object Device {
             c.disconnect()
             return null
         }
-        @Suppress("UNREACHABLE_CODE") null
-    } catch (e: Exception) { "download failed: ${e.message}" }
+        } catch (e: Exception) { return "download failed: ${e.message}" }
+    }
 
     val notifications = Tool("notifications", "List active notifications (via NotificationListener). action list.",
         """{"type":"object","properties":{"action":{"type":"string"}}}""") { _ ->
