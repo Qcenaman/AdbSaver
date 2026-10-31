@@ -25,18 +25,80 @@ object Device {
         ToolResult.image(Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP), caption = "${out.width}x${out.height}")
     }
 
-    val apps = Tool("apps", "List/launch/stop/install/uninstall apps. action + package.",
-        """{"type":"object","properties":{"action":{"type":"string"},"package":{"type":"string"},"filter":{"type":"string"}}}""") { a ->
+    val apps = Tool("apps", "List/launch/stop/install/uninstall apps. action + package. install: url (http/https, downloaded on the phone) or path, optional sha256, size, test (-t), replace (default true).",
+        """{"type":"object","properties":{"action":{"type":"string","enum":["list","launch","stop","install","uninstall"]},"package":{"type":"string"},"filter":{"type":"string"},"url":{"type":"string","description":"http(s) URL of the APK to download and install"},"path":{"type":"string","description":"APK path on the phone"},"sha256":{"type":"string","description":"expected hex sha256 of the APK"},"size":{"type":"integer","description":"expected size in bytes"},"test":{"type":"boolean","description":"allow test-only APKs (pm install -t)"},"replace":{"type":"boolean","description":"reinstall keeping data (pm install -r), default true"}}}""") { a ->
         val pkg = a.string("package")
         when (a.string("action", "list").lowercase()) {
             "list" -> { val (_, o) = Shell.run(ctx, "pm list packages -3"); val f = a.string("filter"); ToolResult.ok(o.lines().map { it.removePrefix("package:") }.filter { f.isEmpty() || it.contains(f, true) }.joinToString("\n")) }
-            "launch" -> ToolResult.ok(Shell.run(ctx, "monkey -p $pkg -c android.intent.category.LAUNCHER 1").second.ifBlank { "launched $pkg" })
-            "stop" -> ToolResult.ok(Shell.run(ctx, "am force-stop $pkg").let { "stopped $pkg" })
-            "install" -> ToolResult.ok(Shell.run(ctx, "pm install -r ${a.string("path")}").second)
-            "uninstall" -> ToolResult.ok(Shell.run(ctx, "pm uninstall $pkg").second)
+            "launch" -> if (pkg.isEmpty()) ToolResult.err("package required") else ToolResult.ok(Shell.run(ctx, ApkInstall.launchCmd(pkg)).second.ifBlank { "launched $pkg" })
+            "stop" -> if (pkg.isEmpty()) ToolResult.err("package required") else ToolResult.ok(Shell.run(ctx, ApkInstall.stopCmd(pkg)).let { "stopped $pkg" })
+            "install" -> install(a)
+            "uninstall" -> if (pkg.isEmpty()) ToolResult.err("package required") else ToolResult.ok(Shell.run(ctx, ApkInstall.uninstallCmd(pkg)).second)
             else -> ToolResult.err("unknown action")
         }
     }
+
+    /** Get the APK into the app's external cache (shell can read it), check it, stage into /data/local/tmp, pm install, clean up. */
+    private fun install(a: Map<String, Any?>): ToolResult {
+        val url = a.string("url").trim(); val path = a.string("path").trim()
+        if (url.isEmpty() && path.isEmpty()) return ToolResult.err("install needs url or path")
+        if (url.isNotEmpty() && !ApkInstall.isHttpUrl(url)) return ToolResult.err("url must be http or https")
+        val dir = ctx.externalCacheDir ?: return ToolResult.err("external cache dir unavailable")
+        dir.mkdirs()
+        val token = java.util.UUID.randomUUID().toString().replace("-", "").take(12)
+        val local = java.io.File(dir, "install-$token.apk")
+        val staged = ApkInstall.stagedPath(token)
+        try {
+            if (url.isNotEmpty()) {
+                download(url, local)?.let { return ToolResult.err(it) }
+            } else {
+                val (code, out) = Shell.run(ctx, "cat ${ApkInstall.q(path)} > ${ApkInstall.q(local.absolutePath)}")
+                if (code != 0 || !local.exists()) return ToolResult.err("cannot read $path: ${out.trim().ifEmpty { "exit $code" }}")
+            }
+            val size = (a["size"] as? Number)?.toLong()
+            ApkInstall.verify(local, size, a.string("sha256"))?.let { return ToolResult.err(it) }
+
+            @Suppress("DEPRECATION")
+            val info = ctx.packageManager.getPackageArchiveInfo(local.absolutePath, 0)
+                ?: return ToolResult.err("not a valid APK (could not parse ${local.length()} bytes)")
+
+            val (sc, so) = Shell.run(ctx, ApkInstall.stageCmd(local.absolutePath, staged))
+            val stagedSize = so.trim().lines().lastOrNull()?.trim()?.toLongOrNull()
+            if (sc != 0 || stagedSize != local.length())
+                return ToolResult.err("staging to $staged failed: ${so.trim().ifEmpty { "exit $sc" }}")
+
+            val (pc, po) = Shell.run(ctx, ApkInstall.installCmd(staged, a.bool("replace", true), a.bool("test", false)))
+            ApkInstall.failure(po, pc)?.let { return ToolResult.err(it) }
+            return ToolResult.ok("installed ${info.packageName} ${info.versionName ?: ""}".trim())
+        } finally {
+            runCatching { Shell.run(ctx, ApkInstall.cleanupCmd(staged)) }
+            local.delete()
+        }
+    }
+
+    /** Download in the engine (not via shell); null on success, else an error. */
+    private fun download(url: String, dest: java.io.File): String? = try {
+        var u = java.net.URL(url); var hops = 0
+        while (true) {
+            val c = u.openConnection() as java.net.HttpURLConnection
+            c.instanceFollowRedirects = false
+            c.setRequestProperty("User-Agent", "AdbSaver"); c.connectTimeout = 15000; c.readTimeout = 60000
+            val code = c.responseCode
+            if (code in 300..399) {
+                val loc = c.getHeaderField("Location") ?: return "redirect without Location"
+                c.disconnect()
+                u = java.net.URL(u, loc)
+                if (u.protocol != "http" && u.protocol != "https") return "redirect to non-http url"
+                if (++hops > 5) return "too many redirects"
+                continue
+            }
+            if (code !in 200..299) { c.disconnect(); return "download failed: HTTP $code" }
+            c.inputStream.use { inp -> dest.outputStream().use { inp.copyTo(it, 64 * 1024) } }
+            c.disconnect()
+            return null
+        }
+        @Suppress("UNREACHABLE_CODE") null
+    } catch (e: Exception) { "download failed: ${e.message}" }
 
     val notifications = Tool("notifications", "List active notifications (via NotificationListener). action list.",
         """{"type":"object","properties":{"action":{"type":"string"}}}""") { _ ->
